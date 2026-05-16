@@ -22,6 +22,20 @@ just the LBA tables those tools produce.
 > table for languages that never shipped, KOS-MOS as a literal C struct
 > field, why `credit.bin` isn't actually credits, etc.).
 
+## What you get
+
+![GUI overview](docs/screenshots/gui-overview.png)
+
+*The local web GUI — ten cards walk you through the full pipeline,
+from "point at an ISO" through "browse decoded textures and movies."*
+
+![Extracted save illustrations](docs/screenshots/extracted-mosaic.png)
+
+*Output: 1,300+ event illustrations, 348 memory-card save scenes
+(above), every character face texture, every cutscene as MP4, every
+voiced line as WAV, and the entire game's compiled MIPS code as a
+disassembly dump. Real extraction; nothing reconstructed or upscaled.*
+
 ## Quick start — GUI (recommended)
 
 Most people will want this path. **It opens in your browser; nothing is
