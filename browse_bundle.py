@@ -24,9 +24,11 @@ per-file 9P writes when ``--out`` is on ``/mnt/c``).
 """
 from __future__ import annotations
 
+import glob
 import os
 import shutil
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,11 +58,29 @@ _COMMON_FFMPEG_LOCATIONS_POSIX = (
 )
 
 
+def _bundled_dir() -> Optional[Path]:
+    """Return the ``tools/`` dir shipped next to the frozen exe, if any.
+
+    In a PyInstaller one-folder build, sys.executable is the launcher exe
+    and its sibling ``tools/`` holds the portable ffmpeg / 7-Zip we ship
+    in the Windows release zip. Returns None when running from source."""
+    if not getattr(sys, "frozen", False):
+        return None
+    tools = Path(sys.executable).resolve().parent / "tools"
+    return tools if tools.is_dir() else None
+
+
 def detect_ffmpeg() -> Optional[str]:
     """Return the full path to a usable ffmpeg executable, or None.
 
-    Searches PATH first, then common install locations. Handles glob-style
-    paths (e.g. WinGet's versioned subdirectory)."""
+    Order: bundled ``tools/`` (frozen builds), PATH, common install
+    locations. Handles glob-style paths (e.g. WinGet's versioned dir)."""
+    bundled = _bundled_dir()
+    if bundled:
+        name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+        candidate = bundled / name
+        if candidate.exists():
+            return str(candidate)
     for name in ("ffmpeg.exe" if os.name == "nt" else "ffmpeg", "ffmpeg"):
         p = shutil.which(name)
         if p:
@@ -70,10 +90,10 @@ def detect_ffmpeg() -> Optional[str]:
         expanded = os.path.expandvars(raw)
         if "*" in expanded:
             # Glob match (e.g. WinGet's ffmpeg-<version>/bin/ffmpeg.exe).
-            matches = sorted(Path("/").glob(expanded.lstrip("/").replace("\\", "/")), reverse=True)
-            for m in matches:
-                if m.exists():
-                    return str(m)
+            # Use stdlib glob — pathlib.Path.glob rejects absolute patterns on Python 3.14+.
+            for m in sorted(glob.glob(expanded), reverse=True):
+                if Path(m).exists():
+                    return m
         elif Path(expanded).exists():
             return expanded
     return None

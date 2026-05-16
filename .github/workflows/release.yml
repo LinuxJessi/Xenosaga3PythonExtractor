@@ -1,0 +1,162 @@
+name: Build Windows release
+
+# Fires on:
+#   * git tag matching v*  (e.g. v0.2.0) — drafts a GitHub Release with the zip attached
+#   * manual workflow_dispatch — produces the same zip as a build artefact (no Release)
+#   * pushes to main that touch packaging — smoke test only, no upload
+#
+# Why all three: the tag path is the one users will actually download. The
+# dispatch path lets Jessi cut a one-off without minting a version. The
+# main-branch path catches "I broke the spec" before tagging.
+
+on:
+  push:
+    tags: ['v*']
+    branches: [main]
+    paths:
+      - 'packaging/**'
+      - '.github/workflows/release.yml'
+      - '**.py'
+      - 'requirements.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed for softprops/action-gh-release on tag pushes
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    env:
+      PYTHON_VERSION: '3.13'   # 3.14 is fine too; 3.13 is the latest with the most-tested PyInstaller bootloader as of mid-2026
+      RELEASE_NAME: Xenosaga3-Extractor
+      FFMPEG_URL: 'https://github.com/GyanD/codexffmpeg/releases/download/2025-01-15-git-4f3c9f2/ffmpeg-2025-01-15-git-4f3c9f2-essentials_build.zip'
+      SEVENZIP_URL: 'https://www.7-zip.org/a/7zr.exe'  # 7zr is the standalone extractor; we use it to unpack the full 7z installer
+      SEVENZIP_FULL_URL: 'https://www.7-zip.org/a/7z2408-x64.exe'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller pillow capstone
+          python -m pip install -r requirements.txt
+
+      - name: Render version-info resources
+        run: python packaging/render_version_info.py
+
+      - name: Generate placeholder icon (skipped if packaging/icon.ico is committed)
+        run: python packaging/build_icon.py
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm --clean packaging/xenosaga-extractor.spec
+
+      # ---- bundle external tools ----------------------------------------
+      - name: Download portable ffmpeg
+        shell: pwsh
+        run: |
+          $url = "${{ env.FFMPEG_URL }}"
+          $zip = "$env:RUNNER_TEMP/ffmpeg.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP/ffmpeg-unpacked"
+          $exe = Get-ChildItem -Path "$env:RUNNER_TEMP/ffmpeg-unpacked" -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          New-Item -ItemType Directory -Force -Path "dist/${{ env.RELEASE_NAME }}/tools" | Out-Null
+          Copy-Item $exe.FullName "dist/${{ env.RELEASE_NAME }}/tools/ffmpeg.exe"
+
+      - name: Download 7-Zip (full, for 7z.exe + 7z.dll)
+        shell: pwsh
+        run: |
+          $tmp = $env:RUNNER_TEMP
+          Invoke-WebRequest -Uri "${{ env.SEVENZIP_URL }}"      -OutFile "$tmp/7zr.exe"
+          Invoke-WebRequest -Uri "${{ env.SEVENZIP_FULL_URL }}" -OutFile "$tmp/7z-full.exe"
+          # 7z-full.exe is a self-extracting SFX; 7zr can unpack it directly.
+          & "$tmp/7zr.exe" x "-o$tmp/7z-unpacked" "$tmp/7z-full.exe" -y | Out-Null
+          Copy-Item "$tmp/7z-unpacked/7z.exe" "dist/${{ env.RELEASE_NAME }}/tools/7z.exe"
+          Copy-Item "$tmp/7z-unpacked/7z.dll" "dist/${{ env.RELEASE_NAME }}/tools/7z.dll"
+
+      - name: Drop a TOOLS.txt with licence pointers
+        shell: pwsh
+        run: |
+          @"
+          Portable binaries bundled with this release:
+            ffmpeg.exe  — from ${{ env.FFMPEG_URL }}
+                          GPL/LGPL build by Gyan Doshi.
+                          Sources: https://github.com/GyanD/codexffmpeg
+            7z.exe      — from ${{ env.SEVENZIP_FULL_URL }}
+            7z.dll      — same.
+                          LGPL with unRAR restriction. © Igor Pavlov.
+                          Sources: https://www.7-zip.org/
+
+          Both are unmodified upstream binaries. We redistribute them here
+          purely so the extractor works on a fresh Windows box with zero
+          additional installs. Replace the contents of this tools/ folder
+          with your own preferred builds at any time.
+          "@ | Set-Content -Path "dist/${{ env.RELEASE_NAME }}/tools/TOOLS.txt"
+
+      # ---- (optional) code signing -------------------------------------
+      # Uncomment + populate the secrets once you have a code-signing cert.
+      # The cheapest path that actually clears SmartScreen "reputation"
+      # immediately is Azure Trusted Signing (~$10/month).
+      # SignPath.io also offers a free OSS tier worth applying for.
+      #
+      # - name: Sign binaries
+      #   uses: azure/trusted-signing-action@v0.5.1
+      #   with:
+      #     azure-tenant-id:        ${{ secrets.AZURE_TENANT_ID }}
+      #     azure-client-id:        ${{ secrets.AZURE_CLIENT_ID }}
+      #     azure-client-secret:    ${{ secrets.AZURE_CLIENT_SECRET }}
+      #     endpoint:               ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
+      #     trusted-signing-account-name: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+      #     certificate-profile-name:     ${{ secrets.TRUSTED_SIGNING_PROFILE }}
+      #     files-folder: dist/${{ env.RELEASE_NAME }}
+      #     files-folder-filter: exe,dll
+
+      # ---- assemble the user-facing zip --------------------------------
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = python -c "import sys; sys.path.insert(0, '.'); from __init__ import __version__; print(__version__)"
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Create release zip
+        shell: pwsh
+        run: |
+          $zip = "${{ env.RELEASE_NAME }}-${{ steps.ver.outputs.version }}-win64.zip"
+          Compress-Archive -Path "dist/${{ env.RELEASE_NAME }}/*" -DestinationPath $zip
+          "ZIP_PATH=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload build artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.RELEASE_NAME }}-win64
+          path: ${{ env.ZIP_PATH }}
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: ${{ env.ZIP_PATH }}
+          generate_release_notes: true
+          body: |
+            ## Windows pre-built release
+
+            Download `${{ env.RELEASE_NAME }}-${{ steps.ver.outputs.version }}-win64.zip`,
+            unzip anywhere, double-click **gui.exe**. No Python, ffmpeg, or
+            7-Zip install required — everything's in the zip.
+
+            ### Windows SmartScreen will warn you the first time
+
+            Because this build isn't yet code-signed, Windows will pop up
+            "Windows protected your PC." Click **More info → Run anyway**.
+            Once Microsoft sees enough downloads of the exact same file, the
+            warning disappears for everyone. We're tracking a code-signing
+            cert; see `docs/security.md` in the zip for the long version.

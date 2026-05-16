@@ -21,6 +21,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 
 from containers import Container, write_container_map
 
@@ -169,10 +170,18 @@ def detect_sevenzip() -> Optional[str]:
     """Return the full path to a usable 7-Zip executable, or None.
 
     Order of preference:
-      1. ``7z`` / ``7z.exe`` / ``7za`` / ``7zz`` on PATH.
-      2. Common per-OS install locations (Windows installer default,
+      1. Portable copy under ``tools/`` next to a frozen exe (Windows release).
+      2. ``7z`` / ``7z.exe`` / ``7za`` / ``7zz`` on PATH.
+      3. Common per-OS install locations (Windows installer default,
          scoop/chocolatey, Homebrew, snap, …).
     """
+    if getattr(sys, "frozen", False):
+        tools = Path(sys.executable).resolve().parent / "tools"
+        if tools.is_dir():
+            for name in ("7z.exe" if os.name == "nt" else "7z", "7za", "7zz"):
+                candidate = tools / name
+                if candidate.exists():
+                    return str(candidate)
     for name in ("7z.exe" if os.name == "nt" else "7z", "7z", "7za", "7zz"):
         p = shutil.which(name)
         if p:
