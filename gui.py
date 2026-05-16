@@ -40,12 +40,34 @@ PY = sys.executable or "python3"
 
 # When frozen by PyInstaller, sys.executable is gui.exe — it can't run cli.py.
 # We ship a sibling CLI binary built from the same spec; invoke it directly.
-if getattr(sys, "frozen", False):
+FROZEN = bool(getattr(sys, "frozen", False))
+if FROZEN:
     _cli_name = "xeno-cli.exe" if os.name == "nt" else "xeno-cli"
     _cli_exe = Path(sys.executable).resolve().parent / _cli_name
-    CLI_ARGV: list[str] = [str(_cli_exe)] if _cli_exe.exists() else [PY, str(CLI)]
+    CLI_ARGV: list[str] = [str(_cli_exe)]
+    CLI_TARGET = _cli_exe
 else:
     CLI_ARGV = [PY, str(CLI)]
+    CLI_TARGET = CLI
+
+
+def _fatal(title: str, body: str) -> None:
+    """Surface a startup error the user can actually see.
+
+    PyInstaller windowed builds have no console — print() goes to the
+    void. On Windows we pop a MessageBox so the user sees *something*
+    instead of an exe that "just doesn't run"."""
+    msg = f"{title}\n\n{body}"
+    print(f"[gui] FATAL: {msg}", file=sys.stderr)
+    if os.name == "nt":
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                0, body, f"Xenosaga III Extractor — {title}", 0x10
+            )
+        except Exception:
+            pass
+    sys.exit(2)
 
 
 # ---------------------------------------------------------------------------
@@ -1508,14 +1530,34 @@ def _free_port() -> int:
 
 
 def main():
-    if not CLI.exists():
-        print(f"[gui] cli.py not found next to gui.py at {CLI}; aborting.", file=sys.stderr)
-        sys.exit(2)
+    if not CLI_TARGET.exists():
+        if FROZEN:
+            _fatal(
+                "CLI binary missing",
+                f"Expected {CLI_TARGET.name} next to gui.exe.\n\n"
+                "Re-extract the release zip — running gui.exe straight from "
+                "the zip preview will fail because Windows only extracts the "
+                "one file you click. Right-click the zip → Extract All…",
+            )
+        else:
+            _fatal(
+                "cli.py missing",
+                f"Expected cli.py next to gui.py at {CLI_TARGET}.",
+            )
 
     port = int(os.environ.get("PORT") or _free_port())
     url = f"http://localhost:{port}/"
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    except OSError as exc:
+        _fatal(
+            "Could not start local server",
+            f"Failed to bind to 127.0.0.1:{port} — {exc}.\n\n"
+            "Most likely something else is already using that port, or "
+            "Windows Firewall is blocking loopback for unsigned binaries.",
+        )
+
     print(f"[gui] Xenosaga III Extractor GUI")
     print(f"[gui] Open: {url}")
     print(f"[gui] Press Ctrl+C to stop.")
@@ -1532,4 +1574,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except BaseException as exc:
+        import traceback
+        _fatal(
+            "Unexpected error during startup",
+            f"{type(exc).__name__}: {exc}\n\n"
+            f"Traceback:\n{traceback.format_exc()}",
+        )
