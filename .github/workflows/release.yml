@@ -29,9 +29,9 @@ jobs:
     env:
       PYTHON_VERSION: '3.13'   # 3.14 is fine too; 3.13 is the latest with the most-tested PyInstaller bootloader as of mid-2026
       RELEASE_NAME: Xenosaga3-Extractor
-      FFMPEG_URL: 'https://github.com/GyanD/codexffmpeg/releases/download/2025-01-15-git-4f3c9f2/ffmpeg-2025-01-15-git-4f3c9f2-essentials_build.zip'
-      SEVENZIP_URL: 'https://www.7-zip.org/a/7zr.exe'  # 7zr is the standalone extractor; we use it to unpack the full 7z installer
-      SEVENZIP_FULL_URL: 'https://www.7-zip.org/a/7z2408-x64.exe'
+      # The GitHub-mirrored 7zr.exe URL never changes; we only use it
+      # to bootstrap unpacking the real 7-Zip installer.
+      SEVENZIP_BOOTSTRAP_URL: 'https://www.7-zip.org/a/7zr.exe'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,40 +58,65 @@ jobs:
         run: pyinstaller --noconfirm --clean packaging/xenosaga-extractor.spec
 
       # ---- bundle external tools ----------------------------------------
-      - name: Download portable ffmpeg
+      # We resolve the *latest* upstream release at build time rather than
+      # hardcoding URLs that go 404 the moment upstream cuts a new version.
+      # GitHub API is rate-limited (60/hr unauth); we pass GITHUB_TOKEN to
+      # raise that to 5000/hr.
+      - name: Download portable ffmpeg (latest BtbN GPL win64)
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $url = "${{ env.FFMPEG_URL }}"
+          $headers = @{
+            'User-Agent'    = 'xenosaga-extractor-release'
+            'Authorization' = "Bearer $env:GH_TOKEN"
+          }
+          $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest' -Headers $headers
+          $asset = $rel.assets | Where-Object { $_.name -like 'ffmpeg-*-win64-gpl.zip' -and $_.name -notlike '*shared*' } | Select-Object -First 1
+          if (-not $asset) { throw "No matching ffmpeg asset in $($rel.tag_name)" }
+          Write-Host "Using ffmpeg asset: $($asset.name) from release $($rel.tag_name)"
           $zip = "$env:RUNNER_TEMP/ffmpeg.zip"
-          Invoke-WebRequest -Uri $url -OutFile $zip
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip -Headers $headers
           Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP/ffmpeg-unpacked"
           $exe = Get-ChildItem -Path "$env:RUNNER_TEMP/ffmpeg-unpacked" -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $exe) { throw "ffmpeg.exe not found in unpacked archive" }
           New-Item -ItemType Directory -Force -Path "dist/${{ env.RELEASE_NAME }}/tools" | Out-Null
           Copy-Item $exe.FullName "dist/${{ env.RELEASE_NAME }}/tools/ffmpeg.exe"
+          "FFMPEG_SOURCE=$($asset.browser_download_url)" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Download 7-Zip (full, for 7z.exe + 7z.dll)
+      - name: Download 7-Zip (latest ip7z release, full for 7z.exe + 7z.dll)
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          $headers = @{
+            'User-Agent'    = 'xenosaga-extractor-release'
+            'Authorization' = "Bearer $env:GH_TOKEN"
+          }
+          $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/ip7z/7zip/releases/latest' -Headers $headers
+          $asset = $rel.assets | Where-Object { $_.name -match '^7z\d+-x64\.exe$' } | Select-Object -First 1
+          if (-not $asset) { throw "No matching 7-Zip installer in $($rel.tag_name)" }
+          Write-Host "Using 7-Zip asset: $($asset.name) from release $($rel.tag_name)"
           $tmp = $env:RUNNER_TEMP
-          Invoke-WebRequest -Uri "${{ env.SEVENZIP_URL }}"      -OutFile "$tmp/7zr.exe"
-          Invoke-WebRequest -Uri "${{ env.SEVENZIP_FULL_URL }}" -OutFile "$tmp/7z-full.exe"
-          # 7z-full.exe is a self-extracting SFX; 7zr can unpack it directly.
+          Invoke-WebRequest -Uri "${{ env.SEVENZIP_BOOTSTRAP_URL }}" -OutFile "$tmp/7zr.exe"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile "$tmp/7z-full.exe" -Headers $headers
+          # The full installer is an SFX archive; 7zr extracts it directly.
           & "$tmp/7zr.exe" x "-o$tmp/7z-unpacked" "$tmp/7z-full.exe" -y | Out-Null
           Copy-Item "$tmp/7z-unpacked/7z.exe" "dist/${{ env.RELEASE_NAME }}/tools/7z.exe"
           Copy-Item "$tmp/7z-unpacked/7z.dll" "dist/${{ env.RELEASE_NAME }}/tools/7z.dll"
+          "SEVENZIP_SOURCE=$($asset.browser_download_url)" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Drop a TOOLS.txt with licence pointers
         shell: pwsh
         run: |
           @"
           Portable binaries bundled with this release:
-            ffmpeg.exe  — from ${{ env.FFMPEG_URL }}
-                          GPL/LGPL build by Gyan Doshi.
-                          Sources: https://github.com/GyanD/codexffmpeg
-            7z.exe      — from ${{ env.SEVENZIP_FULL_URL }}
+            ffmpeg.exe  — from $env:FFMPEG_SOURCE
+                          GPL build by BtbN. Sources: https://github.com/BtbN/FFmpeg-Builds
+            7z.exe      — from $env:SEVENZIP_SOURCE
             7z.dll      — same.
                           LGPL with unRAR restriction. © Igor Pavlov.
-                          Sources: https://www.7-zip.org/
+                          Sources: https://github.com/ip7z/7zip
 
           Both are unmodified upstream binaries. We redistribute them here
           purely so the extractor works on a fresh Windows box with zero
