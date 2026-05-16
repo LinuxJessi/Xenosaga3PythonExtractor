@@ -383,7 +383,7 @@ def detect_deps() -> dict:
             return ""
     return {
         "python": sys.version.split()[0],
-        "cli_exists": CLI.exists(),
+        "cli": str(CLI_TARGET) if CLI_TARGET.exists() else "",
         "ffmpeg": _safe(detect_ffmpeg),
         "7z": _safe(detect_sevenzip),
         "pillow": _try_import("PIL"),
@@ -1267,7 +1267,7 @@ async function loadStatus() {
   const box = document.getElementById('status-box');
   const rows = [
     ['Python', d.deps.python, true],
-    ['cli.py', d.deps.cli_exists ? 'ok' : 'missing', d.deps.cli_exists],
+    ['CLI',      d.deps.cli      || 'NOT FOUND',         !!d.deps.cli],
     ['7-Zip',    d.deps['7z']    || 'NOT FOUND',         !!d.deps['7z']],
     ['ffmpeg',   d.deps.ffmpeg   || 'NOT FOUND',         !!d.deps.ffmpeg],
     ['Pillow',   d.deps.pillow   ? 'installed' : 'pip install Pillow',   d.deps.pillow],
