@@ -15,6 +15,13 @@ just the LBA tables those tools produce.
 > converters are newer and less battle-hardened. **Use your own legally
 > obtained discs only.**
 
+> **For curious testers:** [`docs/disc-catalog.md`](docs/disc-catalog.md)
+> is the full data dictionary — every file extension across both discs,
+> what it actually is, where the engine reads it from, plus a "Fun finds"
+> section at the bottom (developer names left in the binaries, the locale
+> table for languages that never shipped, KOS-MOS as a literal C struct
+> field, why `credit.bin` isn't actually credits, etc.).
+
 ## Quick start — GUI (recommended)
 
 Most people will want this path. **It opens in your browser; nothing is
