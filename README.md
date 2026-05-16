@@ -27,7 +27,50 @@ just the LBA tables those tools produce.
 Most people will want this path. **It opens in your browser; nothing is
 exposed to the internet — the server only listens on `127.0.0.1`.**
 
-### Windows
+### Windows — pre-built (easiest)
+
+1. Grab the latest `Xenosaga3-Extractor-X.Y.Z-win64.zip` from the
+   [Releases page](https://github.com/LinuxJessi/Xenosaga3PythonExtractor/releases).
+2. Right-click → **Extract All…** anywhere you have space. (Extracting
+   matters — running `gui.exe` from inside the zip preview will *not* work.)
+3. Double-click **`gui.exe`**. The first time, Windows will warn
+   "Windows protected your PC." Click **More info → Run anyway**. See
+   *"Why Windows warns the first time"* below.
+
+The zip contains everything: Python, ffmpeg, 7-Zip. Nothing else to
+install. The optional `pip install` step further down isn't needed —
+Pillow and capstone are already inside `gui.exe`.
+
+#### Why Windows warns the first time
+
+The download isn't (yet) signed with a Microsoft-trusted code-signing
+certificate, so SmartScreen flags it as "unrecognized." This is a
+reputation system, not a malware verdict — the file is exactly the one
+GitHub Actions built from the source in this repo (build log:
+`https://github.com/LinuxJessi/Xenosaga3PythonExtractor/actions`).
+
+What we do to keep the warning small:
+
+* **No installer** — just a zip you extract. Installers trigger heavier
+  SmartScreen heuristics than plain zips.
+* **No UPX packing** of the executables (UPX is the single strongest
+  "this is malware" signal in most AV engines' weights).
+* **Full Windows version-info resource** on both `.exe` files, so
+  Properties → Details shows a real company name and description.
+* **One-folder layout** — no unpacking to `%TEMP%` at startup, which is
+  the most-flagged behaviour of one-file bundles.
+* **Build is fully reproducible from GitHub Actions** — feel free to
+  diff your downloaded zip against the workflow's published artefact.
+
+What's still on the roadmap: applying for the free
+[SignPath.io OSS programme](https://signpath.org/) or paying for
+[Azure Trusted Signing](https://learn.microsoft.com/en-us/azure/trusted-signing/)
+(~$10/month). Either eliminates the warning entirely.
+
+If you'd rather not click through, use the manual-install path below or
+run from source.
+
+### Windows — manual install
 
 1. Install **Python 3.8 or newer** from <https://www.python.org/downloads/>.
    **Tick "Add Python to PATH"** on the first installer screen — this is the

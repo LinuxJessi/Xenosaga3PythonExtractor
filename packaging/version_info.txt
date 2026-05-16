@@ -1,0 +1,43 @@
+# UTF-8
+#
+# Windows version resource for the bundled gui.exe / xeno-cli.exe.
+# Substituted by packaging/render_version_info.py at build time so the
+# version here always matches __init__.__version__.
+#
+# Why we bother: an unsigned exe with NO version info, NO company name,
+# and a generic icon is the platonic ideal of "suspicious" to Defender
+# heuristics. Filling these in measurably reduces false-positive rate
+# even before code signing.
+
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(__FILEVERS__),
+    prodvers=(__FILEVERS__),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0),
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          u'040904B0',
+          [
+            StringStruct(u'CompanyName',      u'Jessi Ray Godsibb'),
+            StringStruct(u'FileDescription',  u'__DESCRIPTION__'),
+            StringStruct(u'FileVersion',      u'__VERSION__'),
+            StringStruct(u'InternalName',     u'__INTERNAL__'),
+            StringStruct(u'LegalCopyright',   u'Released under the MIT License.'),
+            StringStruct(u'OriginalFilename', u'__INTERNAL__.exe'),
+            StringStruct(u'ProductName',      u'Xenosaga III Python Extractor'),
+            StringStruct(u'ProductVersion',   u'__VERSION__'),
+          ],
+        ),
+      ],
+    ),
+    VarFileInfo([VarStruct(u'Translation', [1033, 1200])]),
+  ],
+)

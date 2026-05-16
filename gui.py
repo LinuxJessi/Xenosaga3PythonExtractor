@@ -38,6 +38,15 @@ ROOT = Path(__file__).resolve().parent
 CLI = ROOT / "cli.py"
 PY = sys.executable or "python3"
 
+# When frozen by PyInstaller, sys.executable is gui.exe — it can't run cli.py.
+# We ship a sibling CLI binary built from the same spec; invoke it directly.
+if getattr(sys, "frozen", False):
+    _cli_name = "xeno-cli.exe" if os.name == "nt" else "xeno-cli"
+    _cli_exe = Path(sys.executable).resolve().parent / _cli_name
+    CLI_ARGV: list[str] = [str(_cli_exe)] if _cli_exe.exists() else [PY, str(CLI)]
+else:
+    CLI_ARGV = [PY, str(CLI)]
+
 
 # ---------------------------------------------------------------------------
 # Job runner — one subprocess per launched command, lines streamed to clients
@@ -152,7 +161,7 @@ def _bool(form, key):
 
 
 def build_doctor(form):
-    return [PY, str(CLI), "doctor", "--work", _str(form, "work", str(ROOT))]
+    return [*CLI_ARGV, "doctor", "--work", _str(form, "work", str(ROOT))]
 
 
 def build_prep(form):
@@ -160,7 +169,7 @@ def build_prep(form):
     work = _str(form, "work", str(ROOT))
     if not iso:
         raise ValueError("ISO path is required")
-    args = [PY, str(CLI), "prep", "--iso", iso, "--work", work]
+    args = [*CLI_ARGV, "prep", "--iso", iso, "--work", work]
     if _str(form, "sevenzip"):
         args += ["--sevenzip", _str(form, "sevenzip")]
     return args
@@ -168,7 +177,7 @@ def build_prep(form):
 
 def build_map_regions(form):
     work = _str(form, "work", str(ROOT))
-    args = [PY, str(CLI), "map-regions", "--work", work]
+    args = [*CLI_ARGV, "map-regions", "--work", work]
     for raw in (_str(form, "assigns") or "").splitlines():
         raw = raw.strip()
         if raw:
@@ -180,11 +189,11 @@ def build_map_regions(form):
 
 
 def build_toc(form):
-    return [PY, str(CLI), "toc", "--work", _str(form, "work", str(ROOT))]
+    return [*CLI_ARGV, "toc", "--work", _str(form, "work", str(ROOT))]
 
 
 def build_scan(form):
-    args = [PY, str(CLI), "scan", "--work", _str(form, "work", str(ROOT))]
+    args = [*CLI_ARGV, "scan", "--work", _str(form, "work", str(ROOT))]
     if _bool(form, "sniff"):
         args.append("--sniff")
     return args
@@ -193,7 +202,7 @@ def build_scan(form):
 def build_extract(form):
     work = _str(form, "work", str(ROOT))
     out = _str(form, "out", str(Path(work) / "dump"))
-    args = [PY, str(CLI), "extract", "--work", work, "--out", out]
+    args = [*CLI_ARGV, "extract", "--work", work, "--out", out]
     if _bool(form, "dry_run"):
         args.append("--dry-run")
     if _bool(form, "hash"):
@@ -206,7 +215,7 @@ def build_extract(form):
 def build_verify(form):
     work = _str(form, "work", str(ROOT))
     out = _str(form, "out", str(Path(work) / "dump"))
-    args = [PY, str(CLI), "verify", "--work", work, "--out", out]
+    args = [*CLI_ARGV, "verify", "--work", work, "--out", out]
     if _bool(form, "hash"):
         args.append("--hash")
     if _str(form, "limit"):
@@ -219,7 +228,7 @@ def build_code_extract(form):
     out = _str(form, "out")
     if not iso or not out:
         raise ValueError("Both --iso and --out are required")
-    args = [PY, str(CLI), "code-extract", "--iso", iso, "--out", out]
+    args = [*CLI_ARGV, "code-extract", "--iso", iso, "--out", out]
     if _str(form, "sevenzip"):
         args += ["--sevenzip", _str(form, "sevenzip")]
     return args
@@ -231,7 +240,7 @@ def build_browse(form):
     out = _str(form, "out")
     if not dump or not stage:
         raise ValueError("--dump and --stage are required")
-    args = [PY, str(CLI), "browse", "--dump", dump, "--stage", stage]
+    args = [*CLI_ARGV, "browse", "--dump", dump, "--stage", stage]
     if out:
         args += ["--out", out]
     if _str(form, "ffmpeg"):
@@ -247,7 +256,7 @@ def build_disasm(form):
     code_dir = _str(form, "code_dir")
     if not code_dir:
         raise ValueError("--code-dir is required")
-    args = [PY, str(CLI), "disasm", "--code-dir", code_dir]
+    args = [*CLI_ARGV, "disasm", "--code-dir", code_dir]
     if _str(form, "out"):
         args += ["--out", _str(form, "out")]
     return args
@@ -345,11 +354,16 @@ def detect_deps() -> dict:
         from browse_bundle import detect_ffmpeg
     except Exception:
         detect_ffmpeg = lambda: None  # noqa: E731
+    def _safe(fn):
+        try:
+            return fn() or ""
+        except Exception:
+            return ""
     return {
         "python": sys.version.split()[0],
         "cli_exists": CLI.exists(),
-        "ffmpeg": detect_ffmpeg() or "",
-        "7z": detect_sevenzip() or "",
+        "ffmpeg": _safe(detect_ffmpeg),
+        "7z": _safe(detect_sevenzip),
         "pillow": _try_import("PIL"),
         "capstone": _try_import("capstone"),
     }
