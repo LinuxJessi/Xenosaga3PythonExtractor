@@ -1,0 +1,10 @@
+# Core extraction (prep/scan/extract/verify/map-regions/toc/doctor) needs no
+# Python deps — only 7-Zip on PATH.
+#
+# Optional deps below are loaded lazily by individual subcommands.
+
+# `browse --kinds=textures_png` (XTX/TM2 -> PNG decode)
+Pillow>=9.0
+
+# `disasm` (MIPS disassembly + lui/addiu string xrefs)
+capstone>=5.0

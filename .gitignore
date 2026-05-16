@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Runtime artefacts the extractor produces when run in-place
+# (everything below this line is data, not source)
+X3.[0-9]*
+SLUS_*
+*.OVL
+*.IRX
+*.IMG
+SYSTEM.CNF
+container_map.json
+disc_7z_list.txt
+dump/
+out/
+toc/
+browse/
+browse_stage/
+decompiled/
+xenosagaextract/
+
+# ISOs and disc-related blobs — never commit these
+*.iso
+*.7z
+*.bin
+*.cue
+*.mds
+*.mdf
+
+# Build / packaging
+build/
+dist/
+*.spec
