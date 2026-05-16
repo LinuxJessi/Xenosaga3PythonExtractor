@@ -27,19 +27,27 @@ just the LBA tables those tools produce.
 Most people will want this path. **It opens in your browser; nothing is
 exposed to the internet — the server only listens on `127.0.0.1`.**
 
-### Windows — pre-built (easiest)
+### Windows — pre-built (easiest, available since v0.2.3)
 
-1. Grab the latest `Xenosaga3-Extractor-X.Y.Z-win64.zip` from the
-   [Releases page](https://github.com/LinuxJessi/Xenosaga3PythonExtractor/releases).
-2. Right-click → **Extract All…** anywhere you have space. (Extracting
-   matters — running `gui.exe` from inside the zip preview will *not* work.)
+Skip the entire "install Python, install 7-Zip, install ffmpeg" dance.
+The Windows release zip contains everything — just download, extract,
+double-click.
+
+1. Download
+   **[the latest Windows release zip](https://github.com/LinuxJessi/Xenosaga3PythonExtractor/releases/latest)**
+   (look for `Xenosaga3-Extractor-X.Y.Z-win64.zip` under *Assets*, ~95 MB).
+2. Right-click → **Extract All…** anywhere you have space. **Extracting
+   matters** — double-clicking `gui.exe` from inside the zip preview will
+   *not* work.
 3. Double-click **`gui.exe`**. The first time, Windows will warn
    "Windows protected your PC." Click **More info → Run anyway**. See
-   *"Why Windows warns the first time"* below.
+   *["Why Windows warns the first time"](#why-windows-warns-the-first-time)*
+   below.
 
-The zip contains everything: Python, ffmpeg, 7-Zip. Nothing else to
-install. The optional `pip install` step further down isn't needed —
-Pillow and capstone are already inside `gui.exe`.
+That's it. Your browser opens to the GUI; the Environment panel should
+show green ticks for 7-Zip, ffmpeg, Pillow, and capstone (all bundled).
+The optional `pip install` and the separate ffmpeg / 7-Zip installs in
+the manual section below are **not** needed for the pre-built.
 
 #### Why Windows warns the first time
 
