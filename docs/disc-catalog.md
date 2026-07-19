@@ -139,7 +139,7 @@ the "FAC" version of XAP.
 
 | Ext   | Magic   | Notes |
 |-------|---------|-------|
-| `.xtx`| `XTX\0` + u32 size + u32 count + u32 hdr-size + u16 width + u16 fmt + u32 height … | MonolithSoft texture format. 750 across both discs (375 each, mostly the same UI textures). Used for character portraits in `kao/`, UI windows (`window0/1/2.xtx`, `ctrl.xtx`), menu icons. **Decoded to PNG under `browse/textures_png/`** for the 367 linear (fmt=0x04) per disc — the 8 swizzled (fmt=0x08) ones are still raw bytes because the MonolithSoft swizzle pattern doesn't match standard PS2 PSMCT32. |
+| `.xtx`| `XTX\0` + u32 size + u32 count + u32 hdr-size + u16 width + u16 fmt + u32 height … | MonolithSoft texture format. 750 across both discs (375 each, mostly the same UI textures). Used for character portraits in `kao/`, UI windows (`window0/1/2.xtx`, `ctrl.xtx`), menu icons. **All decoded to PNG under `browse/textures_png/`.** The 367 linear (fmt=0x04) per disc are straight 32bpp RGBA. The 8 swizzled (fmt=0x08) ones turned out to be the Xenosaga I layout: a CT32 canvas holding a PSMT8 8-bit image at 2× the header dimensions ("128×128" ctrl.xtx is really a 256×256 DualShock diagram), unswizzled with the standard PS2 `unswizzle8` routine. Their CSM1 palettes are embedded as 16×16 canvas tiles; the palette↔region binding lives in the menu overlays, so multi-palette sheets (window0-2, itemcap, segcap) get a best-guess palette plus a `*_index.png` ground-truth index map. |
 | `.txd`| 8 / 8   | Probably **TXD** — RenderWare-style texture dictionary or a Monolith variant; not yet decoded. |
 | `.txy`| `txy\0` + u32 version | Texture index/manifest (pairs with `.pxy` of same stem). Pure index data, not pixels. |
 | `.tm2`| `TIM2` magic | Sony's PS2 SDK image format. **Decoded to PNG**; in this game they are all 32bpp RGBA with no palette — chapter-select background (`haikei.tm2`) and episode logos (`logo_ep1`, `logo_ep2`, `logo_pp`). |
@@ -173,7 +173,7 @@ the "FAC" version of XAP.
 | Ext   | Count | Role |
 |-------|-------|------|
 | `.adx` | 3996 / 2095 | CRI ADX streamed audio. Convention used in `snd/adx/`: `mev/` = movie voice, `bat_voice/` = battle voice, plus SFX trees. |
-| `.dap` | 607 / 607 | **CRI DTPK sound bank**. At offset 0x40 the magic `ps2_DTPK` appears; followed at a fixed offset by a `ps2_VAGD` chunk holding PS2 SPU2 ADPCM (VAG) audio. Each file is a 2 KiB header + N × 2 KiB pages of bank entries. Decode with **vgmstream** or **VGMToolbox** (CRI ACB/DTPK support); a full Python decoder is out of scope here. |
+| `.dap` | 607 / 607 | **DTPK sound bank** (SEGA sound-driver lineage, PS2 build). A chain of `ps2_DTPK` segments starting at 0x40; each segment carries `ps2_TBLD` driver tables and — when it holds PCM — a `ps2_VAGD` chunk of SPU ADPCM. A pointer at segment+0xB8 locates the sample table: 16-byte records of `{u32 offset, u32 pad, u16 flags, u16 rate_hz, u32 length}` (rates are literal Hz — 48000, 22050, pitch-corrected values like 47866). **Decoded to per-cue WAVs under `browse/soundbanks/` in pure Python** (`dap_decode.py`); segments with no sample table are sequence/definition banks and yield 0 cues by design (e.g. `MIK03.dap`, 3 of Master.dap's 4 segments). |
 
 ---
 
@@ -190,7 +190,8 @@ here is in a format your OS can open without help.
 | `browse/movies/`  | `.sfd`              | `.mp4`     | ffmpeg (x264 CRF 23 + AAC 160 kbps) | 18 / 24 files. Plays in any modern player. |
 | `browse/audio/`   | `.adx`              | `.wav`     | ffmpeg (`pcm_s16le`) | 3995 / 2095 files. Voice clips, SFX, music loops. |
 | `browse/code/`    | ISO root            | unchanged  | 7-Zip extract | 15 files per disc: SLUS executable + 3 OVL overlays + 10 IOP modules + SYSTEM.CNF. |
-| `browse/textures_png/` | `.xtx`, `.tm2`  | `.png`     | xtx_decode.py + tm2 helper | 371 / 371 files (367 linear XTX + 4 TM2 + the swizzled ones written but unreadable). Includes the character portraits, episode logos, chapter-select background. |
+| `browse/textures_png/` | `.xtx`, `.tm2`  | `.png`     | xtx_decode.py + tm2 helper | 379 / 379 files (367 linear XTX + 8 swizzled XTX + 4 TM2), plus a `*_index.png` ground-truth map per swizzled file. Includes the character portraits, episode logos, chapter-select background, and the formerly-scrambled UI sheets. |
+| `browse/soundbanks/` | `.dap`          | `.wav`     | dap_decode.py (pure Python) | One WAV per cue — SFX and instrument samples from `snd/dat/` and the minigame. |
 | `browse/images/mnu/credit/` | `credit.bin` JPGs | `.jpg` | regex SOI/EOI carve | 4 boot logos per disc. |
 
 Subtitle pairing example:
@@ -232,19 +233,23 @@ yet — they need format-specific work beyond the scope of this pipeline:
   reconstruct meshes + skeletons + bound textures into glTF/FBX. The
   container layout is documented (the "Xc" package family above), but
   decoding the actual mesh streams is a separate project.
-- **Swizzled XTX textures** (16 files, mostly UI overlays in `mnu/`) —
-  the MonolithSoft swizzle pattern doesn't match standard PS2 PSMCT32.
-  Bytes are written linearly anyway, just visually scrambled.
 - **Effect data** (`.esd .esp`) — parameter tables for the particle
   system; unlikely to be viewable on their own, but interesting for
   modders.
 - **Event scripts** (`.xep .xev`) — opcode streams for the cutscene VM.
   Without a disassembler for that VM you only see the `Xc\x01\x03` header.
-- **CRI DTPK sound banks** (`.dap`) — wrapped CRI bank format
-  (`ps2_DTPK` + `ps2_VAGD` chunks containing PS2 SPU2 VAG ADPCM). Use
-  vgmstream or VGMToolbox to extract individual cues.
-- **Scene sound banks** (`.sb`) — `SB  ` magic + offset table. Same idea
-  as DAP but Xenosaga-specific.
+- **Scene sound banks** (`.sb`) — `SB  ` magic + a table of section
+  offsets; the payload looks like cue/sequence scripts (opcode streams)
+  that reference samples in the `.dap` banks rather than embedded audio.
+- **Swizzled-XTX palette binding** — the 8 swizzled UI sheets per disc now
+  decode (see the texture table above), but the per-region palette
+  assignments live in the menu overlay code, so multi-palette sheets are
+  partially mis-tinted. Extracting the descriptors from OV02/OV04 would
+  finish the job.
+
+Formerly on this list, now decoded: **swizzled XTX textures** (PSMT8 in a
+CT32 canvas — the Xenosaga I layout) and **DTPK sound banks** (`.dap` →
+per-cue WAVs, `browse/soundbanks/`).
 
 ---
 

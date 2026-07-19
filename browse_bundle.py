@@ -10,9 +10,13 @@ under the stage tree, with one of a handful of conversion strategies:
 * ``textures``     — copy ``.xtx``/``.tm2``/``.txd``/``.txy``/``.bmp``/``.png``
                      into ``textures/`` (raw bytes; XTX/TXD/TXY need a viewer).
 * ``textures_png`` — decode ``.xtx``/``.tm2`` to PNG under ``textures_png/``.
-                     Linear 32-bpp RGBA only; the 8 GS-swizzled XTX files
-                     come out scrambled (see README).
+                     Linear 32-bpp RGBA files decode directly; the 8
+                     GS-swizzled 8-bpp files per disc are unswizzled with a
+                     best-guess embedded palette plus a ``*_index.png``
+                     ground-truth map (see xtx_decode.py).
 * ``audio``        — decode ``.adx`` to PCM WAV via ffmpeg into ``audio/``.
+* ``soundbanks``   — decode ``.dap`` DTPK sound banks to one WAV per cue
+                     under ``soundbanks/`` (pure Python, no ffmpeg).
 * ``movies``       — transcode ``.sfd`` (MPEG-PS + ADX) to H.264+AAC MP4 via
                      ffmpeg into ``movies/``.
 * ``carved``       — carve every JPG embedded in ``credit.bin`` (and any other
@@ -35,7 +39,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Set, Tuple
 
 
-ALL_KINDS = ("images", "text", "textures", "textures_png", "audio", "movies", "carved")
+ALL_KINDS = ("images", "text", "textures", "textures_png", "audio", "soundbanks", "movies", "carved")
 
 
 # Common install locations for ffmpeg on each OS, used when ``ffmpeg`` isn't
@@ -105,6 +109,7 @@ _EXTS = {
     "textures":     {".xtx", ".tm2", ".txd", ".txy", ".bmp", ".png"},
     "textures_png": {".xtx", ".tm2"},
     "audio":        {".adx"},
+    "soundbanks":   {".dap"},
     "movies":       {".sfd"},
     # ``carved`` is filename-based — handled separately.
 }
@@ -121,6 +126,9 @@ class BundleStats:
     textures_png_err: int = 0
     audio_ok: int = 0
     audio_err: int = 0
+    soundbanks_ok: int = 0
+    soundbanks_err: int = 0
+    soundbank_cues: int = 0
     movies_ok: int = 0
     movies_err: int = 0
     carved_jpgs: int = 0
@@ -130,7 +138,7 @@ class BundleStats:
     def total_ok(self) -> int:
         return (
             self.images + self.text + self.textures + self.textures_png_ok
-            + self.audio_ok + self.movies_ok + self.carved_jpgs
+            + self.audio_ok + self.soundbanks_ok + self.movies_ok + self.carved_jpgs
         )
 
 
@@ -166,6 +174,16 @@ def _decode_tm2(in_path: Path, dst: Path) -> Tuple[bool, str]:
         return False, f"{exc}"
 
 
+def _decode_dap(in_path: Path, out_dir: Path) -> Tuple[int, str]:
+    """Returns (cues_written, error). 0 cues with no error = sequence-only bank."""
+    try:
+        import dap_decode
+        n = dap_decode.decode_to_wavs(in_path.read_bytes(), out_dir, in_path.stem)
+        return n, ""
+    except Exception as exc:
+        return -1, f"{exc}"
+
+
 def _convert_one(
     in_path: Path,
     dump_root: Path,
@@ -173,56 +191,63 @@ def _convert_one(
     ffmpeg: str,
     sfd_args: List[str],
     kinds: Set[str],
-) -> Tuple[str, Optional[str]]:
+) -> Tuple[str, Optional[str], int]:
     rel = in_path.relative_to(dump_root)
     ext = in_path.suffix.lower()
 
     # Zero-byte LBA entries faithfully extracted as empty files. Nothing to do.
     if in_path.stat().st_size == 0:
-        return ("skip", None)
+        return ("skip", None, 0)
 
     if "images" in kinds and ext in _EXTS["images"]:
         dest = stage_root / "images" / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(in_path, dest)
-        return ("images", None)
+        return ("images", None, 0)
 
     if "text" in kinds and ext in _EXTS["text"]:
         dest = stage_root / "text" / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(in_path, dest)
-        return ("text", None)
+        return ("text", None, 0)
 
     if "textures" in kinds and ext in _EXTS["textures"]:
         dest = stage_root / "textures" / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(in_path, dest)
-        return ("textures", None)
+        return ("textures", None, 0)
 
     if "textures_png" in kinds and ext == ".xtx":
         dest = (stage_root / "textures_png" / rel).with_suffix(".png")
         ok, err = _decode_xtx(in_path, dest)
-        return ("textures_png", None if ok else f"XTX {rel}: {err}")
+        return ("textures_png", None if ok else f"XTX {rel}: {err}", 0)
 
     if "textures_png" in kinds and ext == ".tm2":
         dest = (stage_root / "textures_png" / rel).with_suffix(".png")
         ok, err = _decode_tm2(in_path, dest)
-        return ("textures_png", None if ok else f"TM2 {rel}: {err}")
+        return ("textures_png", None if ok else f"TM2 {rel}: {err}", 0)
 
     if "audio" in kinds and ext in _EXTS["audio"]:
         dest = (stage_root / "audio" / rel).with_suffix(".wav")
         dest.parent.mkdir(parents=True, exist_ok=True)
         ok, err = _run_ffmpeg([ffmpeg, "-y", "-loglevel", "error", "-i", str(in_path), str(dest)])
-        return ("audio", None if ok else f"ADX {rel}: {err}")
+        return ("audio", None if ok else f"ADX {rel}: {err}", 0)
+
+    if "soundbanks" in kinds and ext in _EXTS["soundbanks"]:
+        out_dir = stage_root / "soundbanks" / rel.parent
+        cues, err = _decode_dap(in_path, out_dir)
+        if cues < 0:
+            return ("soundbanks", f"DAP {rel}: {err}", 0)
+        return ("soundbanks", None, cues)
 
     if "movies" in kinds and ext in _EXTS["movies"]:
         dest = (stage_root / "movies" / rel).with_suffix(".mp4")
         dest.parent.mkdir(parents=True, exist_ok=True)
         cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", str(in_path)] + sfd_args + [str(dest)]
         ok, err = _run_ffmpeg(cmd)
-        return ("movies", None if ok else f"SFD {rel}: {err}")
+        return ("movies", None if ok else f"SFD {rel}: {err}", 0)
 
-    return ("skip", None)
+    return ("skip", None, 0)
 
 
 def _gather(dump_root: Path, kinds: Set[str]) -> List[Path]:
@@ -315,7 +340,7 @@ def bundle(
                 for p in files
             }
             for fut in as_completed(futures):
-                kind, err = fut.result()
+                kind, err, extra = fut.result()
                 if kind == "images":
                     stats.images += 1
                 elif kind == "text":
@@ -328,6 +353,11 @@ def bundle(
                 elif kind == "audio":
                     if err is None: stats.audio_ok += 1
                     else: stats.audio_err += 1; stats.errors.append(err)
+                elif kind == "soundbanks":
+                    if err is None:
+                        stats.soundbanks_ok += 1
+                        stats.soundbank_cues += extra
+                    else: stats.soundbanks_err += 1; stats.errors.append(err)
                 elif kind == "movies":
                     if err is None: stats.movies_ok += 1
                     else: stats.movies_err += 1; stats.errors.append(err)
@@ -340,6 +370,7 @@ def bundle(
                         f"img={stats.images} txt={stats.text} tex={stats.textures} "
                         f"png={stats.textures_png_ok}+{stats.textures_png_err}e "
                         f"adx={stats.audio_ok}+{stats.audio_err}e "
+                        f"dap={stats.soundbanks_ok}+{stats.soundbanks_err}e "
                         f"sfd={stats.movies_ok}+{stats.movies_err}e",
                         flush=True,
                     )
@@ -351,6 +382,7 @@ def bundle(
         f"[browse] done: images={stats.images} text={stats.text} textures={stats.textures} "
         f"textures_png={stats.textures_png_ok}+{stats.textures_png_err}err "
         f"audio={stats.audio_ok}+{stats.audio_err}err "
+        f"soundbanks={stats.soundbanks_ok}+{stats.soundbanks_err}err ({stats.soundbank_cues} cues) "
         f"movies={stats.movies_ok}+{stats.movies_err}err "
         f"carved={stats.carved_jpgs}"
     )
