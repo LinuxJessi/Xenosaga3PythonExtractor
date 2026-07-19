@@ -324,6 +324,19 @@ def build_chr_iso_sweep(form):
     return args
 
 
+def build_repack_tree(form):
+    iso = _str(form, "iso")
+    mod = _str(form, "mod")
+    if not iso or not mod:
+        raise ValueError("ISO copy and mod dir are both required")
+    args = [*CLI_ARGV, "repack-tree", "--iso", iso, "--mod", mod]
+    if _bool(form, "pad"):
+        args.append("--pad")
+    if _bool(form, "dry_run"):
+        args.append("--dry-run")
+    return args
+
+
 BUILDERS = {
     "doctor": build_doctor,
     "prep": build_prep,
@@ -339,6 +352,7 @@ BUILDERS = {
     "chr-palettes": build_chr_palettes,
     "chr-import-palettes": build_chr_import_palettes,
     "chr-iso-sweep": build_chr_iso_sweep,
+    "repack-tree": build_repack_tree,
 }
 
 
@@ -1460,6 +1474,18 @@ async function loadStatus() {
       {name: 'mode', label: 'Mode (blue|warm)', value: 'warm'},
       {name: 'hue', label: 'Hue', value: '0.92'},
     ], 'Recolor ISO'));
+
+  cards.appendChild(makeCard(14, 'repack-tree', 'Repack — patch a mod tree into an ISO',
+    '<b>Work on a copy of your ISO.</b> Takes a folder that mirrors the game tree (<code>mymod/mdl/chr/pc/C3shion00.chr</code> patches <code>\\mdl\\chr\\pc\\C3shion00.chr</code>) and writes every file in it back into the ISO, read-back verified. Same-size replacements always work; enable padding to allow smaller/slightly larger files up to each slot’s sector allocation. Any file type — models, audio, movies, events. See <code>docs/REPACK.md</code>.',
+    [
+      {name: 'iso', label: 'ISO copy to patch', placeholder: 'MOD.iso — never your original',
+       pick: {mode: 'file', filter: 'iso'}},
+      {name: 'mod', label: 'Mod dir (mirror tree)', value: defaultWork + '/mods', pick: {mode: 'dir'}},
+      {name: 'pad', type: 'checkbox', label: 'Allow padded resize',
+       hint: 'permit different sizes up to the sector allocation (zero-padded)'},
+      {name: 'dry_run', type: 'checkbox', label: 'Dry run', value: true,
+       hint: 'list what would be patched without writing'},
+    ], 'Repack'));
 
   document.querySelector('.card').classList.add('open');
 })();

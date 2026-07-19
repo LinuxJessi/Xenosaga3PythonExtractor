@@ -324,6 +324,18 @@ Disc 2 is the same flow with a fresh `--work` directory, using `Lba0.txt` +
 | `code-extract`  | Run 7-Zip over the ISO to pull the non-X3 files (SLUS, OVL, IRX, SYSTEM.CNF) into a directory. |
 | `disasm`        | MIPS R5900 disassembly + `lui`/`addiu` string xrefs for SLUS / OVL ELFs. Needs `capstone`. |
 
+### Depack / repack (any file, both discs)
+
+| Command          | What it does |
+|------------------|--------------|
+| `repack-info`    | Resolve an in-game path: table, container, absolute ISO offset, sector-allocation slack. |
+| `repack-extract` | Pull any one file out of an ISO via the Lba tables (all three tables, both discs). |
+| `repack-patch`   | Write a file back into an ISO in place, read-back verified. Same-size by default; `--pad` allows resizes up to the slot's sector allocation. |
+| `repack-tree`    | Patch an entire mod directory that mirrors the game tree (`mymod/mdl/chr/...` → `\mdl\chr\...`). `--dry-run` previews. GUI card 14. |
+
+Full loop and the disc model's rules: [docs/REPACK.md](docs/REPACK.md).
+Underlying module works standalone too: [`repack.py`](repack.py).
+
 ### Character-texture modding
 
 | Command         | What it does |

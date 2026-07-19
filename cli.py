@@ -34,6 +34,7 @@ from containers import (
 )
 from lba import discover_lba_files
 from regions import auto_assign_regions, parse_manual_assignments, validate_regions, RegionAssignmentError
+import repack
 import resolver
 import scooper
 import toc as toc_mod
@@ -330,6 +331,26 @@ def cmd_chr_iso_sweep(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# whole-file depack/repack (repack.py; see docs/REPACK.md)
+# ---------------------------------------------------------------------------
+
+def cmd_repack_info(args: argparse.Namespace) -> None:
+    repack.cmd_info(args.iso, args.path, args.lba)
+
+
+def cmd_repack_extract(args: argparse.Namespace) -> None:
+    repack.cmd_extract(args.iso, args.path, args.out, args.lba)
+
+
+def cmd_repack_patch(args: argparse.Namespace) -> None:
+    repack.cmd_patch(args.iso, args.path, args.file, args.pad, args.lba)
+
+
+def cmd_repack_tree(args: argparse.Namespace) -> None:
+    repack.cmd_tree(args.iso, args.mod, args.pad, args.dry_run, args.lba)
+
+
+# ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
 
@@ -481,6 +502,38 @@ def _build_parser() -> argparse.ArgumentParser:
     xs.add_argument("--hue", type=float, default=0.92)
     xs.add_argument("--lba", help="dir with Lba0.txt (default: the kit's lba/)")
     xs.set_defaults(func=cmd_chr_iso_sweep)
+
+    ri = sp.add_parser("repack-info", help="Where a disc file lives in the ISO + its slack")
+    ri.add_argument("--iso", required=True)
+    ri.add_argument("--path", required=True, help=r"in-game path, e.g. \snd\adx\bgm\...")
+    ri.add_argument("--lba", help="dir with Lba*.txt (default: the kit's lba/)")
+    ri.set_defaults(func=cmd_repack_info)
+
+    re_ = sp.add_parser("repack-extract", help="Pull any one file out of an ISO")
+    re_.add_argument("--iso", required=True)
+    re_.add_argument("--path", required=True)
+    re_.add_argument("--out", required=True)
+    re_.add_argument("--lba", help="dir with Lba*.txt (default: the kit's lba/)")
+    re_.set_defaults(func=cmd_repack_extract)
+
+    rp = sp.add_parser("repack-patch", help="Write any one file back into an ISO (verified)")
+    rp.add_argument("--iso", required=True, help="work on a COPY of your ISO")
+    rp.add_argument("--path", required=True)
+    rp.add_argument("--file", required=True)
+    rp.add_argument("--pad", action="store_true",
+                    help="allow a different size up to the sector allocation (zero-padded)")
+    rp.add_argument("--lba", help="dir with Lba*.txt (default: the kit's lba/)")
+    rp.set_defaults(func=cmd_repack_patch)
+
+    rt = sp.add_parser("repack-tree",
+                       help="Patch every file of a mirror tree into an ISO (verified)")
+    rt.add_argument("--iso", required=True, help="work on a COPY of your ISO")
+    rt.add_argument("--mod", required=True,
+                    help=r"mod dir mirroring the game tree (mod/mdl/chr/... = \mdl\chr\...)")
+    rt.add_argument("--pad", action="store_true")
+    rt.add_argument("--dry-run", action="store_true")
+    rt.add_argument("--lba", help="dir with Lba*.txt (default: the kit's lba/)")
+    rt.set_defaults(func=cmd_repack_tree)
 
     da = sp.add_parser(
         "disasm",

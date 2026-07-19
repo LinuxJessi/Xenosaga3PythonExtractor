@@ -155,6 +155,11 @@ plain `00`, so for a quick test that one file is enough; cutscenes use the
 Both discs: run the same commands against a Disc 2 copy — identical
 offsets, identical bytes.
 
+For batches (or non-texture files), the general layer is
+[`repack.py`](../repack.py): keep your edited files in a directory that
+mirrors the game tree and `repack-tree` patches them all at once — see
+[REPACK.md](REPACK.md).
+
 The patched ISO also works on real hardware (burn / USB-load) — it's a
 plain same-size byte edit, no filesystem changes.
 
