@@ -199,7 +199,8 @@ under `\evt`, `\mov` and `\snd` came out as garbage.
 - **7-Zip** (`prep` and `code-extract`). On Windows install 7-Zip; on
   macOS/Linux install `p7zip-full`. Pass `--sevenzip /path/to/7z.exe` if it
   isn't on `PATH`.
-- **ffmpeg** (only for `browse` kinds `audio` / `movies`). Static builds work
+- **ffmpeg** (only for `browse` kinds `audio` / `movies`; the `soundbanks`
+  kind decodes `.dap` banks in pure Python). Static builds work
   fine; pass `--ffmpeg /path/to/ffmpeg` if it isn't on `PATH`.
 - Optional Python deps (`pip install -r requirements.txt`):
   - **Pillow** — needed for `browse --kinds textures_png` (XTX/TM2 → PNG).
@@ -322,6 +323,25 @@ Disc 2 is the same flow with a fresh `--work` directory, using `Lba0.txt` +
 | `browse`        | Build a sibling `browse/` tree. Categories (`--kinds`): `images` (JPG copy), `text` (TXT/MES copy), `textures` (XTX/TM2/TXD/TXY/BMP/PNG raw copy), `textures_png` (XTX/TM2 → PNG decode, Pillow needed), `audio` (ADX → WAV, ffmpeg), `movies` (SFD → H.264 MP4, ffmpeg), `carved` (JPGs carved from `credit.bin`-style containers). |
 | `code-extract`  | Run 7-Zip over the ISO to pull the non-X3 files (SLUS, OVL, IRX, SYSTEM.CNF) into a directory. |
 | `disasm`        | MIPS R5900 disassembly + `lui`/`addiu` string xrefs for SLUS / OVL ELFs. Needs `capstone`. |
+
+### Character-texture modding
+
+| Command         | What it does |
+|-----------------|--------------|
+| `chr-decode`    | Decode every texture inside a `.chr` (or `.wpn`/`.sme`) to PNG, plus the raw atlas + index map. |
+| `chr-palettes`  | Export each texture's 256-color CLUT as an editable 16×16 PNG swatch (one pixel = one color). |
+| `chr-import-palettes` | Write edited swatch PNGs back into a `.chr` (lossless round-trip for untouched entries). |
+| `chr-import-entry` | Repaint a texture from a same-size PNG, quantized to its existing palette (experimental). |
+| `chr-recolor`   | Hair recolor of one `.chr` — `--mode blue` (KOS-MOS-style color filter) or `--mode warm` (Shion-style name policy), `--hue 0..1`. |
+| `chr-iso-extract` | Pull one file out of an ISO by its disc path, via the Lba tables. |
+| `chr-iso-patch` | Write a same-size file back into an ISO, read-back verified. |
+| `chr-iso-sweep` | Recolor every matching `.chr` in an ISO in place (work on a copy!). Same offsets on Disc 1 and Disc 2. |
+
+The GUI has cards for the common path (decode → export palettes → import →
+sweep). Guide with the full workflow incl. image-editor palette editing:
+[docs/MODDING-CHARACTERS.md](docs/MODDING-CHARACTERS.md); byte-level spec:
+[docs/chr-txy-format.md](docs/chr-txy-format.md). The underlying module
+also works standalone with positional args: [`chrtex.py`](chrtex.py).
 
 ## Common issues
 

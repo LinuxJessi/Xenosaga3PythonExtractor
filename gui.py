@@ -284,6 +284,46 @@ def build_disasm(form):
     return args
 
 
+def build_chr_decode(form):
+    chrf = _str(form, "chr")
+    out = _str(form, "out")
+    if not chrf or not out:
+        raise ValueError("Both the .chr file and an output dir are required")
+    return [*CLI_ARGV, "chr-decode", "--chr", chrf, "--out", out]
+
+
+def build_chr_palettes(form):
+    chrf = _str(form, "chr")
+    out = _str(form, "out")
+    if not chrf or not out:
+        raise ValueError("Both the .chr file and an output dir are required")
+    return [*CLI_ARGV, "chr-palettes", "--chr", chrf, "--out", out]
+
+
+def build_chr_import_palettes(form):
+    chrf = _str(form, "chr")
+    pals = _str(form, "palettes")
+    out = _str(form, "out")
+    if not chrf or not pals or not out:
+        raise ValueError(".chr, palettes dir and output .chr are all required")
+    return [*CLI_ARGV, "chr-import-palettes", "--chr", chrf,
+            "--palettes", pals, "--out", out]
+
+
+def build_chr_iso_sweep(form):
+    iso = _str(form, "iso")
+    match = _str(form, "match")
+    mode = _str(form, "mode", "blue")
+    if not iso or not match:
+        raise ValueError("ISO (a COPY!) and a name match are required")
+    if mode not in ("blue", "warm"):
+        raise ValueError("mode must be 'blue' or 'warm'")
+    args = [*CLI_ARGV, "chr-iso-sweep", "--iso", iso, "--match", match, "--mode", mode]
+    if _str(form, "hue"):
+        args += ["--hue", _str(form, "hue")]
+    return args
+
+
 BUILDERS = {
     "doctor": build_doctor,
     "prep": build_prep,
@@ -295,6 +335,10 @@ BUILDERS = {
     "code-extract": build_code_extract,
     "browse": build_browse,
     "disasm": build_disasm,
+    "chr-decode": build_chr_decode,
+    "chr-palettes": build_chr_palettes,
+    "chr-import-palettes": build_chr_import_palettes,
+    "chr-iso-sweep": build_chr_iso_sweep,
 }
 
 
@@ -1371,7 +1415,7 @@ async function loadStatus() {
        placeholder: 'auto-detect', pick: {mode: 'file'}},
       {name: 'jobs',  label: 'Parallel jobs', value: '6'},
       {name: 'kinds', label: 'Kinds',
-       value: 'images,text,textures,textures_png,audio,movies,carved',
+       value: 'images,text,textures,textures_png,audio,soundbanks,movies,carved',
        placeholder: 'comma-separated subset'},
     ], 'Build browse'));
 
@@ -1381,6 +1425,41 @@ async function loadStatus() {
       {name: 'code_dir', label: 'Code dir', value: defaultWork + '/browse/code', pick: {mode: 'dir'}},
       {name: 'out', label: 'Output dir', placeholder: 'leave blank to write alongside ELFs', pick: {mode: 'dir'}},
     ], 'Disassemble'));
+
+  cards.appendChild(makeCard(10, 'chr-decode', 'Character textures → PNG',
+    'Decodes every texture inside a <code>.chr</code> (or .wpn/.sme) to PNGs, plus the raw atlas and index map. Get the .chr from the dump tree, or with <code>chr-iso-extract</code> on the command line. See <code>docs/MODDING-CHARACTERS.md</code>.',
+    [
+      {name: 'chr', label: '.chr file', value: defaultWork + '/dump/mdl/chr/pc/C3shion00.chr',
+       pick: {mode: 'file', filter: 'chr'}},
+      {name: 'out', label: 'Output dir', value: defaultWork + '/chrtex_png', pick: {mode: 'dir'}},
+    ], 'Decode'));
+
+  cards.appendChild(makeCard(11, 'chr-palettes', 'Export palettes for editing',
+    'Writes the 256-color palette of each texture as a 16×16 PNG swatch (one pixel = one color). Edit them in GIMP/Photoshop/etc — keep 16×16, 8-bit RGB(A) — then run the next card.',
+    [
+      {name: 'chr', label: '.chr file', value: defaultWork + '/dump/mdl/chr/pc/C3shion00.chr',
+       pick: {mode: 'file', filter: 'chr'}},
+      {name: 'out', label: 'Palette dir', value: defaultWork + '/chrtex_pal', pick: {mode: 'dir'}},
+    ], 'Export palettes'));
+
+  cards.appendChild(makeCard(12, 'chr-import-palettes', 'Import edited palettes',
+    'Writes edited <code>pal_*.png</code> swatches back into a copy of the .chr. Delete the swatches you did not touch first. Patch the result into a COPY of your ISO with <code>chr-iso-patch</code>, or use the sweep card below for whole-character recolors.',
+    [
+      {name: 'chr', label: 'Original .chr', value: defaultWork + '/dump/mdl/chr/pc/C3shion00.chr',
+       pick: {mode: 'file', filter: 'chr'}},
+      {name: 'palettes', label: 'Edited palette dir', value: defaultWork + '/chrtex_pal', pick: {mode: 'dir'}},
+      {name: 'out', label: 'Patched .chr to write', value: defaultWork + '/C3shion00_edit.chr'},
+    ], 'Import palettes'));
+
+  cards.appendChild(makeCard(13, 'chr-iso-sweep', 'Hair recolor — patch a whole ISO',
+    '<b>Work on a copy of your ISO</b> (macOS: <code>cp -c game.iso PINK.iso</code> is instant). Recolors the hair palettes of every matching .chr in place, read-back verified; the same command works on Disc 1 and Disc 2 copies. mode <code>blue</code> = KOS-MOS-style color filter, <code>warm</code> = Shion-style name policy for brown hair. Hue 0..1: 0.92 pink, 0.33 green, 0.66 blue, 0.83 purple.',
+    [
+      {name: 'iso', label: 'ISO copy to patch', placeholder: 'PINK.iso — never your original',
+       pick: {mode: 'file', filter: 'iso'}},
+      {name: 'match', label: 'Character match', value: 'shion', placeholder: 'kosmos, shion, jr, ziggy…'},
+      {name: 'mode', label: 'Mode (blue|warm)', value: 'warm'},
+      {name: 'hue', label: 'Hue', value: '0.92'},
+    ], 'Recolor ISO'));
 
   document.querySelector('.card').classList.add('open');
 })();

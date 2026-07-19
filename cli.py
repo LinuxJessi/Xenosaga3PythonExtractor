@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import List
 
 import browse_bundle
+import chrtex
 import code_extract
 import disasm_code
 import iso_ops
@@ -290,6 +291,45 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# chr texture modding (chrtex.py; see docs/MODDING-CHARACTERS.md)
+# ---------------------------------------------------------------------------
+
+def cmd_chr_decode(args: argparse.Namespace) -> None:
+    chrtex.cmd_decode(args.chr, args.out)
+
+
+def cmd_chr_palettes(args: argparse.Namespace) -> None:
+    chrtex.cmd_export_palettes(args.chr, args.out)
+
+
+def cmd_chr_import_palettes(args: argparse.Namespace) -> None:
+    chrtex.cmd_import_palettes(args.chr, args.palettes, args.out)
+
+
+def cmd_chr_import_entry(args: argparse.Namespace) -> None:
+    chrtex.cmd_import_entry(args.chr, args.name, args.png, args.out)
+
+
+def cmd_chr_recolor(args: argparse.Namespace) -> None:
+    data = Path(args.chr).read_bytes()
+    new, edits = chrtex.recolor(data, args.hue, args.mode)
+    Path(args.out).write_bytes(new)
+    print(f"{edits} palette words -> {args.out}")
+
+
+def cmd_chr_iso_extract(args: argparse.Namespace) -> None:
+    chrtex.cmd_iso_extract(args.iso, args.path, args.out, args.lba)
+
+
+def cmd_chr_iso_patch(args: argparse.Namespace) -> None:
+    chrtex.cmd_iso_patch(args.iso, args.path, args.file, args.lba)
+
+
+def cmd_chr_iso_sweep(args: argparse.Namespace) -> None:
+    chrtex.cmd_iso_sweep(args.iso, args.match, args.mode, args.hue, args.lba)
+
+
+# ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
 
@@ -374,7 +414,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--kinds",
         help=(
             "Comma-separated bundle categories: "
-            "images,text,textures,textures_png,audio,movies,carved. Default: all."
+            "images,text,textures,textures_png,audio,soundbanks,movies,carved. Default: all."
         ),
     )
     b.set_defaults(func=cmd_browse)
@@ -387,6 +427,60 @@ def _build_parser() -> argparse.ArgumentParser:
     ce.add_argument("--out", required=True, help="Destination directory (e.g. browse/code/)")
     ce.add_argument("--sevenzip", help="Path to 7z/7za (optional)")
     ce.set_defaults(func=cmd_code_extract)
+
+    cd = sp.add_parser("chr-decode", help="Decode a .chr's textures to PNG")
+    cd.add_argument("--chr", required=True, help=".chr (or .wpn/.sme) file")
+    cd.add_argument("--out", required=True, help="output directory for PNGs")
+    cd.set_defaults(func=cmd_chr_decode)
+
+    cp = sp.add_parser("chr-palettes", help="Export CLUT tiles as editable 16x16 PNGs")
+    cp.add_argument("--chr", required=True)
+    cp.add_argument("--out", required=True)
+    cp.set_defaults(func=cmd_chr_palettes)
+
+    ci = sp.add_parser("chr-import-palettes", help="Write edited palette PNGs back into a .chr")
+    ci.add_argument("--chr", required=True, help="original .chr")
+    ci.add_argument("--palettes", required=True, help="directory of edited pal_*.png")
+    ci.add_argument("--out", required=True, help="patched .chr to write")
+    ci.set_defaults(func=cmd_chr_import_palettes)
+
+    ie = sp.add_parser("chr-import-entry", help="Repaint a texture (quantized to its palette)")
+    ie.add_argument("--chr", required=True)
+    ie.add_argument("--name", required=True, help="entry name, e.g. shion_hair00")
+    ie.add_argument("--png", required=True, help="replacement image, same size")
+    ie.add_argument("--out", required=True)
+    ie.set_defaults(func=cmd_chr_import_entry)
+
+    cr = sp.add_parser("chr-recolor", help="Hair recolor of one .chr (worked example)")
+    cr.add_argument("--chr", required=True)
+    cr.add_argument("--out", required=True)
+    cr.add_argument("--mode", choices=["blue", "warm"], required=True,
+                    help="blue: band-filter all tiles (KOS-MOS). warm: name-policy tiles (Shion)")
+    cr.add_argument("--hue", type=float, default=0.92, help="target hue 0..1 (default rose pink)")
+    cr.set_defaults(func=cmd_chr_recolor)
+
+    xe = sp.add_parser("chr-iso-extract", help="Pull one file out of an ISO via the Lba tables")
+    xe.add_argument("--iso", required=True)
+    xe.add_argument("--path", required=True, help=r"disc path, e.g. \mdl\chr\pc\C3shion00.chr")
+    xe.add_argument("--out", required=True)
+    xe.add_argument("--lba", help="dir with Lba0.txt (default: the kit's lba/)")
+    xe.set_defaults(func=cmd_chr_iso_extract)
+
+    xp = sp.add_parser("chr-iso-patch", help="Write a same-size file back into an ISO (verified)")
+    xp.add_argument("--iso", required=True)
+    xp.add_argument("--path", required=True)
+    xp.add_argument("--file", required=True)
+    xp.add_argument("--lba", help="dir with Lba0.txt (default: the kit's lba/)")
+    xp.set_defaults(func=cmd_chr_iso_patch)
+
+    xs = sp.add_parser("chr-iso-sweep",
+                       help="Recolor every matching .chr inside an ISO, in place (verified)")
+    xs.add_argument("--iso", required=True, help="work on a COPY of your ISO")
+    xs.add_argument("--match", required=True, help="filename substring, e.g. kosmos or shion")
+    xs.add_argument("--mode", choices=["blue", "warm"], required=True)
+    xs.add_argument("--hue", type=float, default=0.92)
+    xs.add_argument("--lba", help="dir with Lba0.txt (default: the kit's lba/)")
+    xs.set_defaults(func=cmd_chr_iso_sweep)
 
     da = sp.add_parser(
         "disasm",
@@ -418,7 +512,7 @@ def cmd_browse(args: argparse.Namespace) -> None:
         sfd_crf=args.sfd_crf,
         kinds=kinds,
     )
-    if stats.audio_err or stats.movies_err or stats.textures_png_err:
+    if stats.audio_err or stats.soundbanks_err or stats.movies_err or stats.textures_png_err:
         sys.exit(1)
 
 
