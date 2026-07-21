@@ -73,10 +73,18 @@ VRAM** (a 1024×640×32bpp frame ≈ 2.6 MB double-buffered is tight → ~2× re
 
 ## The scheme, by ambition
 
-**Remux core (needed by every tier)** — `sfd_splice.py`, cloning XS1
-`subs.py:splice`: demux the `.sfd`, replace the 0xE0 video PES with a re-encoded
-ES from the AI-processed frames, keep every 0xC0/pack/padding packet verbatim,
-re-emit 2048-byte sector-aligned packs.
+**Remux core — `fmv_sfd.py` (BUILT + PROVEN).** Losslessly splits the `.sfd`
+into video-payload spans vs. everything-else, so the video stream can be
+replaced while the ADX audio and all pack/timing bytes stay verbatim.
+Commands: `selftest <iso>` (round-trip proof), `video <iso> <discpath> <out.m1v>`
+(extract the video ES to upscale), `splice <iso> <discpath> <new.m1v> <out.sfd>`
+(re-inject a re-encoded video, zero-padded to the budget → same-size `.sfd`
+ready for `repack.py patch`). Verified this session: **18/18 Disc-1 movies
+round-trip byte-identical**; the extracted video ES is real `mpeg1video`
+512×320 (ffprobe); a re-encoded video (58% of budget) splices into a valid
+playable 512×320 + ADX stream with the **audio bytes bit-identical** and the
+**frame count preserved (742→742)**; and the spliced movie patches into a
+cloned ISO (read-back verified) and re-extracts clean.
 
 - **Tier 1 — cleaner 512×320, in place (works with today's tools).**
   AI-restore each frame → downscale back to native 512×320 → best-in-class
@@ -101,11 +109,14 @@ re-emit 2048-byte sector-aligned packs.
   quality-for-effort for personal use, though not literally "the game loading
   them."
 
-## Build/validation ladder (each rung boots on PCSX2 before the next)
+## Build/validation ladder
 
-1. Demux→remux an **unmodified** `.sfd` → byte-identical file (proves the splice).
-2. Same-size re-encode of one movie → `repack.py` in place → boots, plays,
-   A/V sync holds (Tier 1).
+1. **DONE** — demux→remux an unmodified `.sfd` → byte-identical (18/18 movies);
+   extracted video ES validated as MPEG-1 512×320; re-encode-within-budget
+   splice → valid playable stream, ADX bit-identical, frame count preserved;
+   spliced movie patched into a cloned ISO (read-back verified). `fmv_sfd.py`.
+2. **Next** — boot a same-size re-encoded movie in PCSX2 → plays full duration,
+   A/V sync drift < 1 frame (Tier 1 hardware confirmation).
 3. Grow one movie → append + catalog repoint → boots, plays (Tier 2 disc side).
 4. 2× one movie + patch the `FUN_0018bd40` ceiling & buffers → plays at higher
    res, or hits the `FUN_002fc8c8` guard (resolution spike).
