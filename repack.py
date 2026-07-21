@@ -8,10 +8,11 @@ patches ISOs directly — no container rebuild, no re-mastering.
 
 Disc model (docs/disc-catalog.md): files live inside X3.* "bigfile"
 containers; each Lba*.txt table is a byte-addressed space over a chain of
-containers. Offsets in the engine's own binary catalogs (X3.00/X3.10/
-X3.20) are implicit — files pack back-to-back at 2048-byte sector
-granularity — so files cannot move or change sector count without
-rebuilding a whole container. What CAN be done, and what this tool does:
+containers. The engine's on-disc catalogs (X3.00/X3.10/X3.20) store an
+explicit per-file (offset, size) — see docs/REPACK.md — so growing a file
+is possible by appending + repointing that one entry (not built here yet;
+worked example: HD FMV, docs/FMV-HD-SCHEME.md). This tool does the simple,
+always-safe subset in place:
 
   * replace a file with one of the same size (always safe), or
   * a smaller/slightly larger one that still fits the file's sector
