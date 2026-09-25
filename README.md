@@ -36,19 +36,94 @@ from "point at an ISO" through "browse decoded textures and movies."*
 voiced line as WAV, and the entire game's compiled MIPS code as a
 disassembly dump. Real extraction; nothing reconstructed or upscaled.*
 
-**New (2026-09-24):** `browse --kinds package_textures` now decodes the
-~20,900 textures that live *inside* other files — every character,
-weapon, field-map and effect texture on the disc (the field maps turned
-out to be LZSS-compressed; that is cracked too) — and the `text` kind
-recovers the menu text tables and the in-map dialogue from the `.txd` /
-`.sb` files. Details and what to re-run: [docs/UPDATES.md](docs/UPDATES.md).
+## What's new — 2026-09-24 improvement run
 
-![Before/after: field-map textures, 4-bit entries and the two-bank fix](docs/screenshots/improve-psmt4-banks.png)
+Five lessons from the sister [Xenosaga I kit](https://github.com/LinuxJessi/Xenosaga1PythonExtractor)
+were re-checked against the XS3 discs, and each one paid off. Full change
+log with what to re-run: [docs/UPDATES.md](docs/UPDATES.md).
+
+- **~20,900 textures were hiding inside other files.** Every character,
+  weapon, field-map and effect texture lives in a `txy` block inside
+  `.chr`/`.wpn`/`.map` packages and `.esd`/`.esp`/`.sme` effect files.
+  `browse --kinds package_textures` decodes all of it to PNG with a CSV
+  manifest.
+- **The field maps are compressed after all** (98 of 168 on Disc 1). The
+  engine's four LZSS decoders were read out of the SLUS decompile and
+  ported (`xcpack.py`, `xc-unpack` command); compressed maps now decode
+  like any other package.
+- **4-bit textures decode** (a quarter of all package entries used to come
+  out as noise), and two texture-table bugs were fixed (strip count, the
+  second upload bank of field maps).
+- **Hidden text recovered.** `.txd` files are the menu text (907 strings),
+  `.sb` "sound banks" are the scene scripts with the in-map dialogue, and
+  the `mnu/us/*.bin` databases are the in-game encyclopedia. All exported
+  by the `text` kind.
+- **Sound banks inside `.sme`** bundles (per-character battle voice/SE)
+  are decoded by the `soundbanks` kind.
+- **UI sheets** (window0-2, itemcap …) now have readable shapes and fonts
+  instead of dither noise, but their **colours are still wrong (sepia /
+  grey)** — a known limitation, fix planned for a future release.
+- A default-run bug where `textures_png` never ran alongside `textures`
+  is fixed.
+
+![Field-map textures](docs/screenshots/improve-field-map.png)
+
+*315 textures out of one LZSS-compressed town map that was undecodable
+before tonight.*
+
+![Before/after: 4-bit entries and the two-bank fix](docs/screenshots/improve-psmt4-banks.png)
 
 *Left: a battle backdrop as the old decoder saw it; right: the same 4-bit
 entry decoded. Below: field-map entries that were blank until the second
-texture bank was overlaid. More panels (UI sheets, effect sprites, a whole
-compressed town map) in `docs/UPDATES.md`.*
+texture bank was overlaid. More panels (effect sprites, UI sheets) in
+`docs/UPDATES.md`.*
+
+### Sample dialogue
+
+From `cf/us/2940.sb`, a Miltia field scene, exactly as the `text` kind
+writes it (`<lN>` = portrait/line slot, `<wNN>` = wait in frames):
+
+```
+[Barth]<l2>Realians of the same model as me\nare displaying strange behaviors.<w45>
+[Barth]<l3>I can't exactly explain it, but they\nseem to take actions completely\nunrelated to their own will.<w45>
+[Corel]<l2>And?<w15> Are you showing\nsigns of that?<w45>
+[Barth]<l2>Well,<w15> I start to hear\nsomeone singing.<w45>
+[Corel]<l2>Singing?<w15> That's odd.<w15>\nI wonder what the cause is.<w45>
+[Owusu]<l3>There's this girl who's always\ngrowing flowers at that hospital\nup ahead!<w45>
+[Emil]<l2>She's weird.<w15> She spends\nall her time at a hospital!<w45>
+```
+
+The same file carries the writers' Japanese scene index
+(`≪レンヌ・ル・シャトー、KOS-MOSと墓標≫` — "Rennes-le-Château, KOS-MOS and
+the grave marker"), and `mnu/us/DBC.bin` yields the encyclopedia:
+
+```
+Aizen Magus
+An elderly resident of\nthe Dabrye Mine.
+An elderly resident of the <Dabrye Mine> on Miltia. Originally\na labor
+immigrant from another star system after Miltia\nbecame a republic …
+```
+
+### Sample audio
+
+Short previews decoded by the kit from Disc 1 (25-second BGM excerpts,
+full-length voice/SE cues). Click to play or download.
+
+| | Source | Sample |
+|---|---|---|
+| BGM | `snd/adx/M01.adx` (81 s) | [bgm_m01.mp3](docs/samples/bgm_m01.mp3) |
+| BGM | `snd/adx/M11.adx` (82 s) | [bgm_m11.mp3](docs/samples/bgm_m11.mp3) |
+| BGM | `snd/adx/M56.adx` (132 s) | [bgm_m56.mp3](docs/samples/bgm_m56.mp3) |
+| BGM | `snd/adx/M78.adx` (94 s) | [bgm_m78.mp3](docs/samples/bgm_m78.mp3) |
+| Battle callout | `snd/adx/bat_voice/allen_bst1.adx` | [voice_bat_voice_allen_bst1.mp3](docs/samples/voice_bat_voice_allen_bst1.mp3) |
+| Event voice | `snd/adx/mev/bat_eld33.adx` | [voice_mev_bat_eld33.mp3](docs/samples/voice_mev_bat_eld33.mp3) |
+| System jingle | `snd/adx/sys/system01.adx` | [voice_sys_system01.mp3](docs/samples/voice_sys_system01.mp3) |
+| Field SE | `snd/dat/CIT.dap` cue 3 | [sfx_CIT_c03.mp3](docs/samples/sfx_CIT_c03.mp3) |
+| Battle SE | bank inside `pac/cf/C3kosmos00.sme`, cue 0 | [sfx_kosmos_bank_c00.mp3](docs/samples/sfx_kosmos_bank_c00.mp3) |
+
+The full set (10 BGM streams, 289 battle callouts, 77 movie voice lines,
+607 sound banks) comes out of `browse --kinds audio,soundbanks` on your
+own disc.
 
 ## Quick start — GUI (recommended)
 
