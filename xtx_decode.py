@@ -23,13 +23,20 @@ Format 0x08 (8 files per disc — mnu/ and mg1/ sheets): the payload is a GS
 local-memory dump — a CT32 "canvas" of width × height words that actually
 holds a PSMT8 8-bit-indexed image of (2·width) × (2·height) pixels, exactly
 like Xenosaga I's XTX. The indices are recovered with the standard PS2
-"unswizzle8" routine. The 256-colour CSM1 palette is parked inside the same
-canvas as one or more 16×16 CT32 tiles (the engine's menu overlays address
-them by GS block pointer, which the file itself does not record). We scan
-block-aligned tiles bottom-right first — the Xenosaga I convention — and
-apply the first plausible palette. Sheets with several palettes (window0-2,
-itemcap, segcap) come out geometrically perfect but partially mis-tinted, so
-a grayscale index-map PNG is emitted alongside as ground truth.
+"unswizzle8" routine. The 256-colour CSM1 palettes are parked inside the
+same canvas as 16×16 CT32 tiles (SLUS addresses them by GS block pointer,
+which the file itself does not record). Palette selection is the scheme
+that fixed the same problem in the Xenosaga I kit: every CLUT-looking tile
+is a candidate; the BASE palette is the one whose whole-image render is
+most spatially coherent (adjacent-pixel colour distance ÷ distance-16
+colour distance — real art is smooth up close and varied at range, a wrong
+palette renders dither noise, ≈1) with a stiff penalty for transparency
+(a wrong palette must not win by hiding pixels behind alpha 0); then each
+64-px block that still reads as noise under the base is repainted with the
+candidate that renders it clearly smoother. Multi-palette sheets
+(window0-2, itemcap, segcap) come out tinted per region this way; the
+chosen CLUT tiles are blanked from the output, and a grayscale index-map
+PNG is still emitted alongside as ground truth.
 
 PS2 alpha is 7-bit with 128 = fully opaque. To produce a PNG the rest of the
 world reads as normal, alpha bytes are scaled ``min(a * 2, 255)``.
@@ -130,42 +137,158 @@ def _clut_at(canvas: bytes, canvas_w: int, palx: int, paly: int) -> List[bytes]:
     return pal
 
 
-def _scan_for_clut(canvas: bytes, canvas_w: int, canvas_h: int) -> List[bytes] | None:
-    """Find an embedded palette tile: block-aligned 16×16, every raw alpha
-    ≤ 0x80, at least 64 distinct colours; bottom-right first."""
-    for py in range(canvas_h - 16, -1, -16):
-        for px in range(canvas_w - 16, -1, -16):
-            distinct = set()
-            ok = True
-            for ey in range(16):
-                row = ((py + ey) * canvas_w + px) * 4
-                for ex in range(16):
-                    r, g, b, a = canvas[row + ex * 4 : row + ex * 4 + 4]
-                    if a > 0x80:
-                        ok = False
-                        break
-                    distinct.add((r, g, b))
-                if not ok:
-                    break
-            if ok and len(distinct) >= 64:
-                return _clut_at(canvas, canvas_w, px, py)
-    return None
+def _clut_tile_like(canvas: bytes, canvas_w: int, px: int, py: int) -> bool:
+    """Does the 16×16 tile at (px, py) look like CLUT data? (every raw alpha
+    ≤ 0x80 — GS 7-bit — and a rich colour count)."""
+    distinct = set()
+    for ey in range(16):
+        row = ((py + ey) * canvas_w + px) * 4
+        for ex in range(16):
+            r, g, b, a = canvas[row + ex * 4 : row + ex * 4 + 4]
+            if a > 0x80:
+                return False
+            distinct.add((r, g, b))
+    return len(distinct) >= 64
+
+
+def _scan_for_clut(canvas: bytes, canvas_w: int, canvas_h: int
+                   ) -> Iterable[Tuple[List[bytes], Tuple[int, int]]]:
+    """Yield ``(palette, (tile_x, tile_y))`` for every block-aligned 16×16
+    tile that looks like a CLUT, bottom-right first (the parking
+    convention), then the finer 8-px grid (CBPs address half blocks)."""
+    seen = set()
+    spots = [(x, y) for y in range(canvas_h - 16, -1, -16)
+             for x in range(canvas_w - 16, -1, -16)]
+    spots += [(x, y) for y in range(canvas_h - 16, -1, -8)
+              for x in range(canvas_w - 16, -1, -8) if x % 16 or y % 16]
+    for px, py in spots:
+        if (px, py) in seen:
+            continue
+        seen.add((px, py))
+        if _clut_tile_like(canvas, canvas_w, px, py):
+            yield _clut_at(canvas, canvas_w, px, py), (px, py)
+
+
+def _region_noise(idx: bytes, W: int, pal: List[bytes],
+                  u0: int, u1: int, v0: int, v1: int) -> Tuple[float, float]:
+    """(coherence ratio, opaque fraction) of a region rendered under a
+    palette — mean L1 RGB distance of horizontally adjacent opaque pixels
+    divided by the same for pixels 16 apart (rows sampled). ≪1 = real art,
+    ≈1 = dither noise (wrong palette), inf = hidden or flat."""
+    adj = adjn = far = farn = opaque = count = 0
+    for v in range(v0, v1, 2):
+        irow = v * W
+        row = [pal[idx[irow + u]] for u in range(u0, u1)]
+        n = len(row)
+        for i, p in enumerate(row):
+            count += 1
+            if not p[3]:
+                continue
+            opaque += 1
+            if i + 1 < n and row[i + 1][3]:
+                q = row[i + 1]
+                adj += abs(p[0] - q[0]) + abs(p[1] - q[1]) + abs(p[2] - q[2])
+                adjn += 1
+            if i + 16 < n and row[i + 16][3]:
+                q = row[i + 16]
+                far += abs(p[0] - q[0]) + abs(p[1] - q[1]) + abs(p[2] - q[2])
+                farn += 1
+    opq = opaque / count if count else 0.0
+    if not count or opq < 0.3 or not adjn or not farn:
+        return float("inf"), opq
+    fbar = far / farn
+    if fbar < 2.0:
+        return float("inf"), opq
+    return (adj / adjn) / fbar, opq
+
+
+def _candidate_score(idx: bytes, W: int, H: int, pal: List[bytes]) -> float:
+    """Whole-image score of a BASE-palette candidate: coherence ratio plus
+    a stiff transparency penalty. Lower is better."""
+    ratio, opq = _region_noise(idx, W, pal, 0, W, 0, H)
+    return ratio + max(0.0, 0.95 - opq) * 2.0
+
+
+def select_palettes(canvas: bytes, canvas_w: int, canvas_h: int,
+                    idx: bytes, out_w: int, out_h: int
+                    ) -> Tuple[List[bytes] | None, List[List[bytes]], List[Tuple[int, int]]]:
+    """(base palette or None, all candidate palettes, tiles chosen).
+    See the module docstring for the ranking."""
+    cands = [(pal, xy) for pal, xy in _scan_for_clut(canvas, canvas_w, canvas_h)]
+    # de-duplicate identical palettes (colour-variant strips repeat entries)
+    uniq: List[Tuple[List[bytes], Tuple[int, int]]] = []
+    for pal, xy in cands:
+        if all(pal != p for p, _ in uniq):
+            uniq.append((pal, xy))
+    if not uniq:
+        return None, [], []
+    best, base, base_xy = float("inf"), None, None
+    for pal, xy in uniq[:40]:
+        s = _candidate_score(idx, out_w, out_h, pal)
+        if s < best:
+            best, base, base_xy = s, pal, xy
+    if base is None or best > 1.2:
+        return None, [p for p, _ in uniq], []
+    return base, [p for p, _ in uniq], [base_xy]
 
 
 def decode_indexed(data: bytes) -> Tuple[XTXHeader, int, int, bytes, bytes]:
     """Decode a fmt=0x08 file. Returns ``(header, out_w, out_h, indices,
     rgba)`` where ``indices`` is the raw PSMT8 index map (ground truth) and
-    ``rgba`` applies the best-guess embedded palette (grayscale identity when
+    ``rgba`` is the coherence-ranked palette render (grayscale identity when
     no palette tile is found)."""
     hdr = parse_header(data)
     canvas = data[hdr.data_offset : hdr.data_offset + hdr.width * hdr.height * 4]
     out_w, out_h = hdr.width * 2, hdr.height * 2
+    W, H = out_w, out_h
     idx = _unswizzle8(canvas, hdr.width, out_w, out_h)
-    pal = _scan_for_clut(canvas, hdr.width, hdr.height)
-    lut = pal if pal else [bytes((i, i, i, 255)) for i in range(256)]
+    base, pals, used = select_palettes(canvas, hdr.width, hdr.height, idx, W, H)
+    lut = base if base else [bytes((i, i, i, 255)) for i in range(256)]
     rgba = bytearray(out_w * out_h * 4)
     for i, ib in enumerate(idx):
         rgba[i * 4 : i * 4 + 4] = lut[ib]
+
+    def paint(pal, u0, u1, v0, v1):
+        for v in range(v0, v1):
+            drow = v * W * 4
+            irow = v * W
+            for u in range(u0, u1):
+                rgba[drow + u * 4 : drow + u * 4 + 4] = pal[idx[irow + u]]
+
+    # per-64px-block rescue: where the base palette renders dither noise,
+    # another parked CLUT that renders the block clearly smoother wins
+    if base is not None and len(pals) > 1:
+        pal_xy = {}
+        for pal, xy in _scan_for_clut(canvas, hdr.width, hdr.height):
+            key = bytes(b"".join(pal))
+            pal_xy.setdefault(key, xy)
+        for v0 in range(0, H, 64):
+            v1 = min(H, v0 + 64)
+            for u0 in range(0, W, 64):
+                u1 = min(W, u0 + 64)
+                bn, _ = _region_noise(idx, W, base, u0, u1, v0, v1)
+                if bn == float("inf") or bn < 0.75:
+                    continue
+                best_pal, best_n = None, bn
+                for pal in pals[:40]:
+                    if pal == base:
+                        continue
+                    n, _ = _region_noise(idx, W, pal, u0, u1, v0, v1)
+                    if n < best_n:
+                        best_pal, best_n = pal, n
+                if best_pal is not None and best_n < bn * 0.5:
+                    paint(best_pal, u0, u1, v0, v1)
+                    xy = pal_xy.get(bytes(b"".join(best_pal)))
+                    if xy and xy not in used:
+                        used.append(xy)
+
+    # CLUT tiles are palette data, not art: blank the tiles actually used
+    for tx, ty in used:
+        px0, py0 = tx * 2, ty * 2
+        for y in range(max(0, py0), min(H, py0 + 32)):
+            drow = y * W * 4
+            for x in range(max(0, px0), min(W, px0 + 32)):
+                rgba[drow + x * 4 : drow + x * 4 + 4] = b"\x00\x00\x00\x00"
     return hdr, out_w, out_h, idx, bytes(rgba)
 
 

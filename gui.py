@@ -1429,7 +1429,7 @@ async function loadStatus() {
        placeholder: 'auto-detect', pick: {mode: 'file'}},
       {name: 'jobs',  label: 'Parallel jobs', value: '6'},
       {name: 'kinds', label: 'Kinds',
-       value: 'images,text,textures,textures_png,audio,soundbanks,movies,carved',
+       value: 'images,text,textures,textures_png,package_textures,audio,soundbanks,movies,carved',
        placeholder: 'comma-separated subset'},
     ], 'Build browse'));
 
@@ -1441,7 +1441,7 @@ async function loadStatus() {
     ], 'Disassemble'));
 
   cards.appendChild(makeCard(10, 'chr-decode', 'Character textures → PNG',
-    'Decodes every texture inside a <code>.chr</code> (or .wpn/.sme) to PNGs, plus the raw atlas and index map. Get the .chr from the dump tree, or with <code>chr-iso-extract</code> on the command line. See <code>docs/MODDING-CHARACTERS.md</code>.',
+    'Decodes every texture inside a <code>.chr</code> (or .wpn/.map — compressed field maps included; 8-bit, 4-bit and raw entries) to PNGs, plus the raw atlas and index map. Get the .chr from the dump tree, or with <code>chr-iso-extract</code> on the command line. See <code>docs/MODDING-CHARACTERS.md</code>.',
     [
       {name: 'chr', label: '.chr file', value: defaultWork + '/dump/mdl/chr/pc/C3shion00.chr',
        pick: {mode: 'file', filter: 'chr'}},

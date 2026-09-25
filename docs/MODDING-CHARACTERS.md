@@ -50,8 +50,14 @@ blue, `0.83` purple.
   *indexed* pixels plus 16×16-pixel *palettes* (CLUTs), one per material.
   A texture's color scheme is entirely in its 256-entry palette.
 - Because of that, **recoloring never touches pixels** — you edit a few
-  hundred palette bytes and the whole hairdo follows. And because nothing
-  on the disc is compressed, edits drop straight back in at the same size.
+  hundred palette bytes and the whole hairdo follows. And because
+  characters and weapons are stored uncompressed, edits drop straight back
+  in at the same size. (Field maps are the exception: `mdl/map/E3_*.map`
+  are LZSS-packed, so `chr-decode` can *view* their textures but the
+  editing commands refuse them — see `docs/UPDATES.md`.)
+- A few entries per model are 4-bit (`fmt 0x14`, 16-colour 8×2 palettes —
+  small decals such as weapon lettering or glasses). They decode, but the
+  palette export/import commands work on the 256-colour tiles only.
 - Each character has many `.chr` variants (costumes `00..NN`, high-res
   cutscene models `H00..`, a low-LOD `L00`) and each variant has its *own*
   palettes (lighting is baked in — they are similar, not identical). A

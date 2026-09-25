@@ -23,6 +23,7 @@ from typing import List
 
 import browse_bundle
 import chrtex
+import xcpack
 import code_extract
 import disasm_code
 import iso_ops
@@ -434,8 +435,10 @@ def _build_parser() -> argparse.ArgumentParser:
     b.add_argument(
         "--kinds",
         help=(
-            "Comma-separated bundle categories: "
-            "images,text,textures,textures_png,audio,soundbanks,movies,carved. Default: all."
+            "Comma-separated bundle categories: images,text,textures,textures_png,"
+            "package_textures,audio,soundbanks,movies,carved. Default: all. "
+            "package_textures decodes the textures inside .chr/.wpn/.map packages "
+            "and .esd/.esp/.sme effect files (pure Python, several minutes)."
         ),
     )
     b.set_defaults(func=cmd_browse)
@@ -448,6 +451,14 @@ def _build_parser() -> argparse.ArgumentParser:
     ce.add_argument("--out", required=True, help="Destination directory (e.g. browse/code/)")
     ce.add_argument("--sevenzip", help="Path to 7z/7za (optional)")
     ce.set_defaults(func=cmd_code_extract)
+    xu = sp.add_parser(
+        "xc-unpack",
+        help="Inspect an Xc MR package (.chr/.map/.wpn/.sme) and optionally write it decompressed",
+    )
+    xu.add_argument("package", help="Path to the package file")
+    xu.add_argument("--out", help="Write the stored-form (decompressed) package here")
+    xu.set_defaults(func=cmd_xc_unpack)
+
 
     cd = sp.add_parser("chr-decode", help="Decode a .chr's textures to PNG")
     cd.add_argument("--chr", required=True, help=".chr (or .wpn/.sme) file")
@@ -551,6 +562,21 @@ def _build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def cmd_xc_unpack(args: argparse.Namespace) -> None:
+    data = Path(args.package).read_bytes()
+    hdr = xcpack.parse_header(data)
+    flat = xcpack.normalize(data)
+    print(f"[xc-unpack] version {hdr.version:#06x} "
+          f"({'compressed' if hdr.compressed else 'stored'}), payload "
+          f"{hdr.size_stored} -> {hdr.size_decompressed} bytes, "
+          f"sub-resources: {', '.join(hdr.tags) or '-'}")
+    for tag, (off, size) in xcpack.sub_resources(flat).items():
+        print(f"  {tag:4s} @ {off:#010x}  {size:>10d} bytes")
+    if args.out:
+        Path(args.out).write_bytes(flat)
+        print(f"[xc-unpack] -> {args.out} ({len(flat)} bytes)")
+
+
 def cmd_browse(args: argparse.Namespace) -> None:
     kinds = None
     if args.kinds:
@@ -603,7 +629,10 @@ def cmd_disasm(args: argparse.Namespace) -> None:
 def main(argv: List[str] | None = None) -> None:
     ap = _build_parser()
     args = ap.parse_args(argv)
-    args.func(args)
+    try:
+        args.func(args)
+    except (chrtex.ChrError, xcpack.XcError) as exc:
+        raise SystemExit(f"[{args.cmd if hasattr(args, 'cmd') else 'error'}] {exc}")
 
 
 if __name__ == "__main__":

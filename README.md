@@ -36,6 +36,20 @@ from "point at an ISO" through "browse decoded textures and movies."*
 voiced line as WAV, and the entire game's compiled MIPS code as a
 disassembly dump. Real extraction; nothing reconstructed or upscaled.*
 
+**New (2026-09-24):** `browse --kinds package_textures` now decodes the
+~20,900 textures that live *inside* other files — every character,
+weapon, field-map and effect texture on the disc (the field maps turned
+out to be LZSS-compressed; that is cracked too) — and the `text` kind
+recovers the menu text tables and the in-map dialogue from the `.txd` /
+`.sb` files. Details and what to re-run: [docs/UPDATES.md](docs/UPDATES.md).
+
+![Before/after: field-map textures, 4-bit entries and the two-bank fix](docs/screenshots/improve-psmt4-banks.png)
+
+*Left: a battle backdrop as the old decoder saw it; right: the same 4-bit
+entry decoded. Below: field-map entries that were blank until the second
+texture bank was overlaid. More panels (UI sheets, effect sprites, a whole
+compressed town map) in `docs/UPDATES.md`.*
+
 ## Quick start — GUI (recommended)
 
 Most people will want this path. **It opens in your browser; nothing is
@@ -320,7 +334,7 @@ Disc 2 is the same flow with a fresh `--work` directory, using `Lba0.txt` +
 | `scan`          | Walks every LBA row, resolves to `(container, local_offset)`, writes manifest. |
 | `extract`       | Slice bytes per the manifest into a mirrored tree. |
 | `verify`        | Cross-check extracted file sizes (and optionally SHA-1) against the manifest. |
-| `browse`        | Build a sibling `browse/` tree. Categories (`--kinds`): `images` (JPG copy), `text` (TXT/MES copy), `textures` (XTX/TM2/TXD/TXY/BMP/PNG raw copy), `textures_png` (XTX/TM2 → PNG decode, Pillow needed), `audio` (ADX → WAV, ffmpeg), `movies` (SFD → H.264 MP4, ffmpeg), `carved` (JPGs carved from `credit.bin`-style containers). |
+| `browse`        | Build a sibling `browse/` tree. Categories (`--kinds`): `images` (JPG copy), `text` (TXT/MES/T copy, `.txd` menu-text tables decoded, dialogue/database strings sniffed out of `.sb`/`.bin`/`.dat` as `*.strings.txt`), `textures` (XTX/TM2/TXY/BMP/PNG raw copy), `textures_png` (XTX/TM2 → PNG decode, Pillow needed), `package_textures` (every texture inside `.chr`/`.wpn`/`.map` packages and `.esd`/`.esp`/`.sme` effect files → PNG + `package_textures.csv`, pure Python), `audio` (ADX → WAV, ffmpeg), `soundbanks` (DAP → per-cue WAV, incl. the banks inside `.sme`), `movies` (SFD → H.264 MP4, ffmpeg), `carved` (JPGs carved from `credit.bin`-style containers). |
 | `code-extract`  | Run 7-Zip over the ISO to pull the non-X3 files (SLUS, OVL, IRX, SYSTEM.CNF) into a directory. |
 | `disasm`        | MIPS R5900 disassembly + `lui`/`addiu` string xrefs for SLUS / OVL ELFs. Needs `capstone`. |
 
@@ -332,6 +346,7 @@ Disc 2 is the same flow with a fresh `--work` directory, using `Lba0.txt` +
 | `repack-extract` | Pull any one file out of an ISO via the Lba tables (all three tables, both discs). |
 | `repack-patch`   | Write a file back into an ISO in place, read-back verified. Same-size by default; `--pad` allows resizes up to the slot's sector allocation. |
 | `repack-tree`    | Patch an entire mod directory that mirrors the game tree (`mymod/mdl/chr/...` → `\mdl\chr\...`). `--dry-run` previews. GUI card 14. |
+| `xc-unpack`      | Inspect an `Xc` MR package (`.chr`/`.map`/`.wpn`/`.sme`): version, sub-resources; `--out` writes it decompressed (the field maps are LZSS-packed on disc — see `xcpack.py`). |
 
 Full loop and the disc model's rules: [docs/REPACK.md](docs/REPACK.md).
 Underlying module works standalone too: [`repack.py`](repack.py).
@@ -340,7 +355,7 @@ Underlying module works standalone too: [`repack.py`](repack.py).
 
 | Command         | What it does |
 |-----------------|--------------|
-| `chr-decode`    | Decode every texture inside a `.chr` (or `.wpn`/`.sme`) to PNG, plus the raw atlas + index map. |
+| `chr-decode`    | Decode every texture inside a `.chr` (or `.wpn`/`.map`, compressed maps included) to PNG — 8-bit, 4-bit and raw-CT32 entries — plus the raw atlas + index map. |
 | `chr-palettes`  | Export each texture's 256-color CLUT as an editable 16×16 PNG swatch (one pixel = one color). |
 | `chr-import-palettes` | Write edited swatch PNGs back into a `.chr` (lossless round-trip for untouched entries). |
 | `chr-import-entry` | Repaint a texture from a same-size PNG, quantized to its existing palette (experimental). |

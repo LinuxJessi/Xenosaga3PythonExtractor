@@ -101,15 +101,29 @@ engine calls an **MR Package** (Multi-Resource Package). Layout:
        ("XHR ","XAP ","XAC ","XST ","XTX "…)
 ```
 
+The version word at +0x02 selects how the payload is stored — reversed from
+the SLUS loader (`FUN_001b7330` dispatch, decoders `FUN_001b7438/7480/7558/7620`):
+
+| Version | Storage | On disc |
+|---------|---------|---------|
+| `0x0001` | stored | `.chr`, `.wpn`, `.sme`, 70 battle `.map` |
+| `0x0101` / `0x0201` | LZSS-A (12-bit distance, 4-bit length, `dist 0` = end) | not seen on Disc 1 |
+| `0x0301` | LZSS-B (u16 distance+1, u8 length+1, `0` = end) | not seen on Disc 1 |
+| `0x0401` | LZSS-C (two flag bits pick a short 12/4-bit or long u16/u8 form) | 98 field `.map` |
+
+`+0x04` is the decompressed payload size, `+0x08` the stored size; the
+sub-resource offsets at 0x40 index the decompressed image. Full bit-level
+spec in [`xcpack.py`](../xcpack.py).
+
 Wrapped types and their roles in the engine (from SLUS assertion strings):
 
 | Outer ext | Magic    | Where     | What it bundles | Engine name |
 |-----------|----------|-----------|-----------------|-------------|
 | `.chr`    | `Xc\x01` | `mdl/chr/{pc,npc,cit,cfn}/` | A complete character: pxy + txy + xhr (hierarchy/skeleton) + epf (effects?) + textures. KOS-MOS is `pc/C3kosmos00.chr`. | XAct character |
-| `.map`    | `Xc\x01` | `mdl/map/` | Map geometry packages: a battle background, a town hub, etc. | XAct map |
+| `.map`    | `Xc\x01\x00` / `Xc\x01\x04` | `mdl/map/` | Map geometry packages: a battle background, a town hub, etc. **98 of 168 on Disc 1 (every `E3_*` field map) are LZSS-compressed** (version word `0x0401`); `xcpack.py` decodes them. Their `txy` block holds every backdrop texture — decoded by `browse --kinds package_textures`. | XAct map |
 | `.wpn`    | `Xc\x01` | `mdl/wpn/` | Weapon model packages (`allen_bow01.wpn` is Allen's bow). | XAct weapon |
-| `.sme`    | `Xc\x01` | `pac/cf/`, `pac/bat/` | "State for ME" — combatant resource bundles for a given character/state. Contains XAP animation packs and many XAC curves. | XAct combatant |
-| `.xep`    | `Xc\x01\x03` | `evt/`, `evt/us/` | Event/scripted-scene file (cutscene logic data). | event package |
+| `.sme`    | `Xc\x01` | `pac/cf/`, `pac/bat/` | "State for ME" — combatant resource bundles for a given character/state. Sub-resources: `xap` (animation pack + XAC curves), `esp` (the character's tech effects — free-standing txy texture records, all duplicates of `ef/`), `dat`, and in 15 bundles a complete `dap` DTPK sound bank (battle voice/SE — decoded by the `soundbanks` kind). | XAct combatant |
+| `.xep`    | `Xc\x01\x03` | `evt/`, `evt/us/` | Event/scripted-scene file (cutscene logic data). Shares the `Xc` prefix but is **not** an MR package (no `Xp` tag, 0x10-byte header) and does not decode with the MR LZSS flavours — the event loader has its own scheme (open). | event package |
 | `.xev`    | `XEV ` magic | `evt/`     | Event vector data — paired with `.xep` per scene. | event vector |
 | `.chp`    | (custom)  | `mdl/pac/` | "Character package" combining many character entries. | — |
 
@@ -121,7 +135,7 @@ Sub-resource types (the 4-byte tags inside the package's Xp directory):
 | `xap`  | XAP — animation package | Animation clip bundle. `XacKeyType_Hermite` curves inside. |
 | `xac`  | XAC — animation curves | Individual curve resources inside an XAP. `CURRENT_XAC_VERSION`. |
 | `pxy`  | "proxy" geometry | Lightweight collision / proxy mesh. |
-| `txy`  | texture proxy | Texture index/manifest for the package. |
+| `txy`  | texture proxy | Texture block of the package: CT32 strip uploads composing a GS canvas, a named entry table (PSMT8 / PSMT4 / raw CT32 rects with CLUT positions); field maps carry two upload banks. Spec: [chr-txy-format.md](chr-txy-format.md). The same record also appears free-standing inside `.esd`/`.esp`/`.sme` (effect sprites). |
 | `xst`  | XST — static? | Static state tables. |
 | `epf`  | effect/face? | Bound to face animation in characters. |
 
@@ -140,7 +154,7 @@ the "FAC" version of XAP.
 | Ext   | Magic   | Notes |
 |-------|---------|-------|
 | `.xtx`| `XTX\0` + u32 size + u32 count + u32 hdr-size + u16 width + u16 fmt + u32 height … | MonolithSoft texture format. 750 across both discs (375 each, mostly the same UI textures). Used for character portraits in `kao/`, UI windows (`window0/1/2.xtx`, `ctrl.xtx`), menu icons. **All decoded to PNG under `browse/textures_png/`.** The 367 linear (fmt=0x04) per disc are straight 32bpp RGBA. The 8 swizzled (fmt=0x08) ones turned out to be the Xenosaga I layout: a CT32 canvas holding a PSMT8 8-bit image at 2× the header dimensions ("128×128" ctrl.xtx is really a 256×256 DualShock diagram), unswizzled with the standard PS2 `unswizzle8` routine. Their CSM1 palettes are embedded as 16×16 canvas tiles; the palette↔region binding lives in the menu overlays, so multi-palette sheets (window0-2, itemcap, segcap) get a best-guess palette plus a `*_index.png` ground-truth index map. |
-| `.txd`| 8 / 8   | Probably **TXD** — RenderWare-style texture dictionary or a Monolith variant; not yet decoded. |
+| `.txd`| 4 / 4 (`mnu/us/`) | **Text data, not textures**: an offset table + NUL-terminated strings with `$cmd;` layout codes. `menutext.txd` = the whole menu UI (907 strings; count-prefixed table variant), `synopsis.txd` (chapter synopses, bonus unlock text), `discchg.txd` (disc-change / save prompts), `devchk.txd` (memory-card messages). Decoded by the `text` kind as `*.txd.txt`. |
 | `.txy`| `txy\0` + u32 version | Texture index/manifest (pairs with `.pxy` of same stem). Pure index data, not pixels. |
 | `.tm2`| `TIM2` magic | Sony's PS2 SDK image format. **Decoded to PNG**; in this game they are all 32bpp RGBA with no palette — chapter-select background (`haikei.tm2`) and episode logos (`logo_ep1`, `logo_ep2`, `logo_pp`). |
 
@@ -156,14 +170,14 @@ the "FAC" version of XAP.
 | Ext  | Count | Pairs with | What it is |
 |------|-------|------------|------------|
 | `.t` | 647 / 647 | `cf/{id}.t` | Tab-separated text manifest for cutscene/encounter `{id}`. Lists `map`, `ene` (enemy), `mdl` entries by name. CRLF, UTF-8. |
-| `.sb`| 715 / 715 | `cf/us/{id}.sb` | "Sound Bank" — `SB  ` magic + version + count + offset table. Localized voice/SFX bank for that scene. |
+| `.sb`| 715 / 715 | `cf/us/{id}.sb` | **Scene script bank** (not a sound bank): `SB  ` magic, then up to six sections of `{u32 kind=8, u32 count, u32 offsets[]}`; the text section holds the scene's field dialogue and choices ("Board the E.S.?", "Yes\nNo"), voice-cue ids (`ce100_045`), and the writers' **EUC-JP** scene notes (BGM settings, stage directions) that shipped on the US disc. Decoded by the `text` kind as `*.sb.strings.txt`. |
 
 ### Localized message data
 
 | Ext  | Count | Where | Notes |
 |------|-------|-------|-------|
 | `.mes` | 6 / 6 | `mnu/`, `bat/` | Message tables — localized strings. |
-| `.bin` | 17 / 17 | `mnu/`, `bat/` | Generic binary. **`mnu/credit.bin` turns out to be a tiny container holding 4 JPGs** — the boot-up publisher / developer logos (Bandai Namco, MonolithSoft). Each JPG is **extracted under `browse/images/mnu/credit/`**. Header: u32 count(?)+4 u32 file-offsets, then the JPGs concatenated. |
+| `.bin` | 17 / 17 | `mnu/`, `bat/` | Generic binary. **`mnu/credit.bin` turns out to be a tiny container holding 4 JPGs** — the boot-up publisher / developer logos (Bandai Namco, MonolithSoft). Each JPG is **extracted under `browse/images/mnu/credit/`**. Header: u32 count(?)+4 u32 file-offsets, then the JPGs concatenated. The `mnu/us/*.bin` files are text databases (`DBC.bin`/`DBC2.bin` character & enemy encyclopedia, `njBtlText.bin` battle UI, `njDataText.bin`, `SegmentFileData.bin` segment-address text, `MVtext.bin`, `bat/us/batdat.bin` E.S. names) — their strings are sniffed out by the `text` kind as `*.strings.txt`. |
 | `.dat` | 23 / 23 | `mg1/`, `mnu/` | Generic data (e.g. `mg1/us/Message.Dat` is the minigame's English message table). |
 | `.shp` | 25 / 25 | `mnu/shop/` | Shop inventory tables (`07.shp` = shop 07's stock). Small (~500B) binary lookup. |
 | `.pxy` | 82 / 82 | `mnu/`, `mg1/` | Standalone proxy/index file (same `pxy` tag used inside `.chr` packages). |
@@ -185,7 +199,9 @@ here is in a format your OS can open without help.
 | Folder            | Source ext(s)       | Output ext | Tool          | Notes |
 |-------------------|---------------------|------------|---------------|-------|
 | `browse/images/`  | `.jpg`              | `.jpg`     | copy          | 1542 (D1) / 1524 (D2) files, 30 MB each disc |
-| `browse/textures/`| `.xtx .txd .txy .tm2 .bmp .png` | unchanged | copy | 569 / 568 files; BMP/PNG/TM2 are already viewable; XTX/TXD/TXY need a format converter |
+| `browse/textures/`| `.xtx .txy .tm2 .bmp .png` | unchanged | copy | BMP/PNG/TM2 are already viewable; XTX/TXY need a format converter |
+| `browse/textures_png/_packages/` | `.chr .wpn .map .esd .esp .sme` | `.png` | chrtex.py + xcpack.py (pure Python, multi-process) | ~20,900 unique textures per disc (~18,000 duplicates recorded, not re-written): every character/weapon atlas entry, every field & battle backdrop, every effect sprite. Manifest: `browse/package_textures.csv`. |
+| `browse/text/*.txd.txt`, `*.strings.txt` | `.txd .sb .bin .dat` | text | browse_bundle.py | menu text tables, in-map dialogue + EUC-JP scene notes, encyclopedia/database strings |
 | `browse/text/`    | `.txt .mes`         | unchanged  | copy          | 158 / 141 files; cutscene subtitles + menu strings. Subtitles pair 1:1 with `browse/movies/` |
 | `browse/movies/`  | `.sfd`              | `.mp4`     | ffmpeg (x264 CRF 23 + AAC 160 kbps) | 18 / 24 files. Plays in any modern player. |
 | `browse/audio/`   | `.adx`              | `.wav`     | ffmpeg (`pcm_s16le`) | 3995 / 2095 files. Voice clips, SFX, music loops. |
