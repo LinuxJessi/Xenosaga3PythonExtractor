@@ -153,7 +153,7 @@ the "FAC" version of XAP.
 
 | Ext   | Magic   | Notes |
 |-------|---------|-------|
-| `.xtx`| `XTX\0` + u32 size + u32 count + u32 hdr-size + u16 width + u16 fmt + u32 height … | MonolithSoft texture format. 750 across both discs (375 each, mostly the same UI textures). Used for character portraits in `kao/`, UI windows (`window0/1/2.xtx`, `ctrl.xtx`), menu icons. **All decoded to PNG under `browse/textures_png/`.** The 367 linear (fmt=0x04) per disc are straight 32bpp RGBA. The 8 swizzled (fmt=0x08) ones turned out to be the Xenosaga I layout: a CT32 canvas holding a PSMT8 8-bit image at 2× the header dimensions ("128×128" ctrl.xtx is really a 256×256 DualShock diagram), unswizzled with the standard PS2 `unswizzle8` routine. Their CSM1 palettes are embedded as 16×16 canvas tiles; the palette↔region binding lives in the menu overlays, so multi-palette sheets (window0-2, itemcap, segcap) get a best-guess palette plus a `*_index.png` ground-truth index map. |
+| `.xtx`| `XTX\0` + u32 size + u32 count + u32 hdr-size + u16 width + u16 fmt + u32 height … | MonolithSoft texture format. 750 across both discs (375 each, mostly the same UI textures). Used for character portraits in `kao/`, UI windows (`window0/1/2.xtx`, `ctrl.xtx`), menu icons. **All decoded to PNG under `browse/textures_png/`.** The 367 linear (fmt=0x04) per disc are straight 32bpp RGBA. The 8 swizzled (fmt=0x08) ones turned out to be the Xenosaga I layout: a CT32 canvas holding a PSMT8 8-bit image at 2× the header dimensions ("128×128" ctrl.xtx is really a 256×256 DualShock diagram), unswizzled with the standard PS2 `unswizzle8` routine. Their CSM1 palettes are embedded as 16×16 canvas tiles; the palette↔region binding lives in SLUS, so multi-palette sheets (window0-2, itemcap, segcap) get a coherence-ranked *guess* — geometry right, **tint known-wrong (sepia/grey), fix planned** — plus a `*_index.png` ground-truth index map. |
 | `.txd`| 4 / 4 (`mnu/us/`) | **Text data, not textures**: an offset table + NUL-terminated strings with `$cmd;` layout codes. `menutext.txd` = the whole menu UI (907 strings; count-prefixed table variant), `synopsis.txd` (chapter synopses, bonus unlock text), `discchg.txd` (disc-change / save prompts), `devchk.txd` (memory-card messages). Decoded by the `text` kind as `*.txd.txt`. |
 | `.txy`| `txy\0` + u32 version | Texture index/manifest (pairs with `.pxy` of same stem). Pure index data, not pixels. |
 | `.tm2`| `TIM2` magic | Sony's PS2 SDK image format. **Decoded to PNG**; in this game they are all 32bpp RGBA with no palette — chapter-select background (`haikei.tm2`) and episode logos (`logo_ep1`, `logo_ep2`, `logo_pp`). |
@@ -257,11 +257,11 @@ yet — they need format-specific work beyond the scope of this pipeline:
 - **Scene sound banks** (`.sb`) — `SB  ` magic + a table of section
   offsets; the payload looks like cue/sequence scripts (opcode streams)
   that reference samples in the `.dap` banks rather than embedded audio.
-- **Swizzled-XTX palette binding** — the 8 swizzled UI sheets per disc now
-  decode (see the texture table above), but the per-region palette
-  assignments live in the menu overlay code, so multi-palette sheets are
-  partially mis-tinted. Extracting the descriptors from OV02/OV04 would
-  finish the job.
+- **Swizzled-XTX palette binding** — the 8 swizzled UI sheets per disc
+  decode geometrically (see the texture table above), but the per-region
+  palette assignments live in SLUS (not in OV02/OV04 — checked), so the
+  sheets are sepia/grey. Planned fix: capture the TEX0 CBP/CSA bindings
+  from EE RAM with a menu open and ship them as a per-sheet table.
 
 Formerly on this list, now decoded: **swizzled XTX textures** (PSMT8 in a
 CT32 canvas — the Xenosaga I layout) and **DTPK sound banks** (`.dap` →

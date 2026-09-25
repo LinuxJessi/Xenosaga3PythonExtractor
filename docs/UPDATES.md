@@ -102,19 +102,25 @@ at the entry's `pal_x/pal_y`.
   ASCII runs) as `*.strings.txt`. `.t` scene manifests (tab-separated
   text) join the `text` kind. Disc 1: 4 `.txd` + ~730 string tables.
 
-### Swizzled UI sheets: coherence-ranked palettes
+### Swizzled UI sheets: better, **not finished — known sepia/grey tint**
 
 ![UI sheet palettes before/after](screenshots/improve-ui-palettes.png)
 
 The 8 standalone `fmt = 0x08` XTX sheets (window0-2, itemcap, segcap,
-ctrl, titleobj, Picture) used the *first plausible* CLUT tile. XS1's
-selector (GitHub issue #1 there) is ported: every CLUT-looking tile is a
-candidate, the base palette is the one whose render is most spatially
-coherent with a transparency penalty, and 64-px blocks that still read as
-noise are repainted with the candidate that renders them smoother; the
-chosen tiles are blanked. window0's portraits and fonts now read
-correctly; multi-palette regions are tinted per block. `*_index.png`
-ground-truth maps are still written.
+ctrl, titleobj, Picture) used the *first plausible* CLUT tile, which
+rendered most regions as dither noise. XS1's selector is ported: every
+CLUT-looking tile is a candidate, the base palette is the one whose render
+is most spatially coherent (with a transparency penalty), 64-px blocks
+that still read as noise are repainted with a smoother candidate, and the
+chosen tiles are blanked. Result: the *geometry* now reads — portraits are
+recognisable, fonts are legible, item icons have shape — but the
+**colours are still wrong**: window0 comes out sepia, itemcap's objects
+grey. The ranking cannot separate a monotone ramp palette from the true
+one (under a ramp every index map looks smooth), so it settles on
+whichever ramp is parked in the canvas. Treat these 8 PNGs as previews;
+`*_index.png` remains the ground truth. The fix is planned for a future
+release and needs runtime data, not a better heuristic — see "Still
+open" below.
 
 ### What the text sweep actually reads like
 
@@ -172,16 +178,15 @@ re-run.
 * `.xep` event packages start with `Xc\x01\x03` but are not MR packages
   and do not decode with any of the four LZSS flavours — the event loader
   has its own scheme.
-* **The UI sheets are still wrong-tinted** (sepia portraits, grey item
-  icons). The coherence ranking cannot tell a monotone ramp palette from
-  the true one — under a ramp every index map renders "smooth" — and a
-  colourfulness tie-breaker tried on 2026-09-24 made things worse
-  (wrong palettes pass the gate, portraits wash out), so it was not
-  shipped. A 5-word sprite table found in SLUS at 0x2e3c54 (`w, h, u, v,
-  id`; 139 records) binds a *different* sheet (font glyphs). The real
-  fix is runtime ground truth: TEX0 CBP/CSA values captured from EE RAM
-  while the menu is open (PINE), or the sprite tables the menu code
-  builds for window0-2.
+* **UI sheet colours (planned for a future release).** window0-2 /
+  itemcap / segcap are geometrically right but sepia/grey — see above. A
+  colourfulness tie-breaker tried on 2026-09-24 made things worse (wrong
+  palettes pass the gate, portraits wash out) and was not shipped. A
+  5-word sprite table found in SLUS at 0x2e3c54 (`w, h, u, v, id`; 139
+  records) binds a *different* sheet (font glyphs). Plan: capture the
+  TEX0 CBP/CSA values the menu code writes to EE RAM while a menu is open
+  (the PINE rig), map them back to canvas tiles, and ship them as a
+  per-sheet region→palette table.
 * Which palette the engine binds to the noisy residual map entries.
 * `.shp` shop tables (item-id byte lists), `.chp` character packs
   (`0x60`-word header, not Xc), `.esd`/`.esp` script bodies.

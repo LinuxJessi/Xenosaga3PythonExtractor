@@ -33,10 +33,17 @@ colour distance — real art is smooth up close and varied at range, a wrong
 palette renders dither noise, ≈1) with a stiff penalty for transparency
 (a wrong palette must not win by hiding pixels behind alpha 0); then each
 64-px block that still reads as noise under the base is repainted with the
-candidate that renders it clearly smoother. Multi-palette sheets
-(window0-2, itemcap, segcap) come out tinted per region this way; the
-chosen CLUT tiles are blanked from the output, and a grayscale index-map
-PNG is still emitted alongside as ground truth.
+candidate that renders it clearly smoother; the chosen CLUT tiles are
+blanked from the output.
+
+KNOWN LIMITATION (2026-09): the geometry is right but the COLOURS ARE NOT —
+window0-2 render sepia, itemcap's icons grey. The ranking cannot separate
+a monotone ramp palette from the true one (under a ramp every index map
+looks smooth), so it settles on whichever ramp is parked in the canvas.
+Treat the RGBA output of these 8 files as a preview; the grayscale
+``*_index.png`` emitted alongside is the ground truth. A fix needs the
+engine's own region→palette binding (planned: capture TEX0 CBP/CSA from
+EE RAM with the menu open and ship it as a per-sheet table).
 
 PS2 alpha is 7-bit with 128 = fully opaque. To produce a PNG the rest of the
 world reads as normal, alpha bytes are scaled ``min(a * 2, 255)``.

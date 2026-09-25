@@ -16,8 +16,10 @@ under the stage tree, with one of a handful of conversion strategies:
 * ``textures_png`` — decode ``.xtx``/``.tm2`` to PNG under ``textures_png/``.
                      Linear 32-bpp RGBA files decode directly; the 8
                      GS-swizzled 8-bpp files per disc are unswizzled and
-                     paletted by coherence-ranked CLUT selection plus a
-                     ``*_index.png`` ground-truth map (see xtx_decode.py).
+                     paletted by coherence-ranked CLUT selection (shape is
+                     right, tint is known-wrong — sepia/grey — fix planned;
+                     see xtx_decode.py) plus a ``*_index.png`` ground-truth
+                     map.
 * ``package_textures`` — decode every texture that lives INSIDE another file:
                      the ``txy`` block of ``.chr`` / ``.wpn`` / ``.map``
                      MR packages (LZSS field maps decompressed on the fly)
