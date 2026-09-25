@@ -116,6 +116,37 @@ chosen tiles are blanked. window0's portraits and fonts now read
 correctly; multi-palette regions are tinted per block. `*_index.png`
 ground-truth maps are still written.
 
+### What the text sweep actually reads like
+
+`cf/us/2940.sb` (a Miltia field scene), straight from `*.sb.strings.txt`:
+
+```
+[Barth]<l2>Realians of the same model as me\nare displaying strange behaviors.<w45>
+[Barth]<l3>I can't exactly explain it, but they\nseem to take actions completely\nunrelated to their own will.<w45>
+[Corel]<l2>And?<w15> Are you showing\nsigns of that?<w45>
+[Barth]<l2>Well,<w15> I start to hear\nsomeone singing.<w45>
+[Corel]<l2>Singing?<w15> That's odd.<w15>\nI wonder what the cause is.<w45>
+[Owusu]<l3>There's this girl who's always\ngrowing flowers at that hospital\nup ahead!<w45>
+[Emil]<l2>She's weird.<w15> She spends\nall her time at a hospital!<w45>
+```
+
+`<lN>` picks the speaker's portrait/line slot, `<wNN>` is a wait in
+frames, `\n` a line break. The same bank's EUC-JP block is the writers'
+scene index — `≪レンヌ・ル・シャトー、KOS-MOSと墓標≫` ("Rennes-le-Château,
+KOS-MOS and the grave marker") — and `mnu/us/DBC.bin` is the in-game
+encyclopedia (Ernest Luis, Aizen Magus … full entries).
+
+### Audio, for the record
+
+Nothing new was needed to *decode* it, but the survey confirmed what is
+where: streamed BGM is `snd/adx/M*.adx` (10 tracks on Disc 1, 18 s –
+132 s each, plus `E*.adx` event streams and `S*.adx`), battle callouts in
+`snd/adx/bat_voice/`, movie/event voice in `snd/adx/mev/`, system
+jingles in `snd/adx/sys/`; the `.dap` banks (`snd/dat/Master.dap` 55
+cues, `CIT.dap` 15 …) and the per-character banks inside `pac/cf/*.sme`
+hold the SE. Audio is not committed to the repository — decode your own
+disc with `browse --kinds audio,soundbanks`.
+
 ### Sound banks inside `.sme`
 
 Every combatant bundle with a `dap` sub-resource carries a complete DTPK
@@ -141,8 +172,16 @@ re-run.
 * `.xep` event packages start with `Xc\x01\x03` but are not MR packages
   and do not decode with any of the four LZSS flavours — the event loader
   has its own scheme.
-* Which palette the engine binds to the noisy residual map entries, and
-  the exact per-region palettes of the UI sheets (SLUS-side texture
-  descriptors, not overlay descriptors as in XS1).
+* **The UI sheets are still wrong-tinted** (sepia portraits, grey item
+  icons). The coherence ranking cannot tell a monotone ramp palette from
+  the true one — under a ramp every index map renders "smooth" — and a
+  colourfulness tie-breaker tried on 2026-09-24 made things worse
+  (wrong palettes pass the gate, portraits wash out), so it was not
+  shipped. A 5-word sprite table found in SLUS at 0x2e3c54 (`w, h, u, v,
+  id`; 139 records) binds a *different* sheet (font glyphs). The real
+  fix is runtime ground truth: TEX0 CBP/CSA values captured from EE RAM
+  while the menu is open (PINE), or the sprite tables the menu code
+  builds for window0-2.
+* Which palette the engine binds to the noisy residual map entries.
 * `.shp` shop tables (item-id byte lists), `.chp` character packs
   (`0x60`-word header, not Xc), `.esd`/`.esp` script bodies.
