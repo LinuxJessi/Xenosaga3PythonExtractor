@@ -3,7 +3,8 @@
 By Jessi Ray Godsibb. Originally bootstrapped with ChatGPT; rebuilt around the
 corrected disc model.
 
-Extracts game assets from the Xenosaga III ISOs using only Python + 7-Zip. No
+Extracts game assets from the **Xenosaga Episode III: Also sprach Zarathustra**
+(PlayStation 2 / PS2, USA release SLUS-21389) ISOs using only Python + 7-Zip. No
 legacy EXEs (Xeno23Lbae, xenounpack, XenoLbar, XenoRepack) needed at runtime —
 just the LBA tables those tools produce.
 
