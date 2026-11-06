@@ -266,6 +266,10 @@ ordered **bigfile** chains:
 | 1    | `X3.10` (~52 KB)  | `X3.11` + `X3.12` + `X3.13` | `Lba1.txt` |
 | 2    | `X3.20` (~26 KB)  | `X3.21` + `X3.22` + `X3.23` | `Lba2.txt` |
 
+The catalogs are the game's own directory index (sector + size per path,
+front-coded names). `x3index.py` reads them directly, so the `Lba*.txt`
+tables can be regenerated from any disc with `lba-from-iso`.
+
 The 3.0x chain is **identical on both discs** (system/UI/models). 3.1x lives
 on Disc 1 only, 3.2x on Disc 2 only.
 
@@ -403,6 +407,7 @@ Disc 2 is the same flow with a fresh `--work` directory, using `Lba0.txt` +
 |-----------------|--------------|
 | `doctor`        | Prints `container_map.json`, on-disk X3.\*, LBA max-ends. |
 | `prep`          | 7-Zip listing + X3.\* extraction + v2 `container_map.json` (no regions). |
+| `lba-from-iso`  | Build `Lba*.txt` from the disc's own `X3.00/X3.10/X3.20` index (format in `x3index.py`). Matches the vendored tables exactly on US discs and also handles other builds such as the May 2006 prototype. `prep` runs it automatically when `<work>/lba/` is empty. |
 | `container-map` | Rebuild `container_map.json` from a saved 7-Zip listing (no re-extract). |
 | `map-regions`   | Assign each `Lba*.txt` to a container chain (`--assign` or auto). |
 | `toc`           | Human-readable summary of the merged LBA tables. |

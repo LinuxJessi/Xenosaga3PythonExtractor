@@ -40,6 +40,7 @@ import resolver
 import scooper
 import toc as toc_mod
 import verify_cmd
+import x3index
 
 
 def _ensure_dirs(work: Path) -> None:
@@ -67,11 +68,25 @@ def cmd_prep(args: argparse.Namespace) -> None:
         raise SystemExit("No X3.* containers found in 7-Zip listing.")
     write_container_map(work / "container_map.json", conts, regions=None)
     iso_ops.sevenzip_extract(iso, work, ["X3.*"], args.sevenzip)
+    if not discover_lba_files(work):
+        written = x3index.write_lba_from_iso(iso, work / "lba")
+        print(f"[prep] Built {', '.join(p.name for p in written)} from the disc's own X3.x0 index")
     print(
         f"[prep] Wrote disc_7z_list.txt, container_map.json ({len(conts)} containers) "
         f"and extracted X3.* to {work}"
     )
     print("[prep] Next: run `map-regions` (auto or --assign) to wire LBA sources to containers.")
+
+
+def cmd_lba_from_iso(args: argparse.Namespace) -> None:
+    iso = Path(args.iso)
+    if not iso.exists():
+        raise SystemExit(f"ISO not found: {iso}")
+    written = x3index.write_lba_from_iso(iso, Path(args.out))
+    if not written:
+        raise SystemExit("No X3.00/X3.10/X3.20 index found at the ISO root.")
+    for p in written:
+        print(f"[lba-from-iso] wrote {p} ({sum(1 for _ in p.open())} entries)")
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +379,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--work", required=True)
     p.add_argument("--sevenzip", help="Path to 7z/7za (optional)")
     p.set_defaults(func=cmd_prep)
+
+    lf = sp.add_parser("lba-from-iso", help="Build Lba*.txt from the disc's own X3.00/X3.10/X3.20 index (any build, incl. prototypes)")
+    lf.add_argument("--iso", required=True)
+    lf.add_argument("--out", required=True, help="output dir, usually <work>/lba")
+    lf.set_defaults(func=cmd_lba_from_iso)
 
     cm = sp.add_parser("container-map", help="Rebuild container_map.json from a saved 7z listing")
     cm.add_argument("--list", required=True, help="disc_7z_list.txt from `7z l -ba`")

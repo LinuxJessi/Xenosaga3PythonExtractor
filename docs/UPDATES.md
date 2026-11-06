@@ -5,6 +5,30 @@ to benefit from it. (Same convention as the Xenosaga I kit's
 `docs/UPDATES.md`; this file starts with the first improvement run ported
 back from that project.)
 
+## 2026-11-05 — Lba tables straight from the disc (`lba-from-iso`)
+
+The kit used to depend on `lba/Lba0/1/2.txt`, which were made in 2006 by
+Lybac's Windows tool *Xeno23Lbae*. Those tables only describe the US
+retail discs. The game itself finds files through the three small index
+files at the ISO root (`X3.00`, `X3.10`, `X3.20`). Their format was
+reversed from the SLUS loader (`FUN_00187e28` lookup, `FUN_00187bd8`
+directory walk, `FUN_00187b18` name decode) and is documented in
+[`x3index.py`](../x3index.py).
+
+- **New command:** `cli.py lba-from-iso --iso Disc.iso --out <work>/lba`.
+  On the US discs it reproduces the vendored `Lba0.txt` (9,867 rows),
+  `Lba1.txt` (3,649) and `Lba2.txt` (1,709) exactly. The only
+  differences are line endings and the old tool's trailing NUL.
+- **`prep` now builds the tables itself** when `<work>/lba/` is empty, so
+  you no longer need to copy `lba/` first.
+- **Other builds work too.** The May 22 2006 press prototype has
+  different offsets (3,654 rows in Lba1, including five files that retail
+  cut), so the vendored tables would extract garbage from it. The
+  generated tables extract it correctly.
+
+**To benefit:** nothing to do for the US discs. For any other build, run
+`lba-from-iso` (or `prep` into a fresh work dir) instead of copying `lba/`.
+
 ## 2026-09-24 — improvement run ported from the Xenosaga I kit
 
 Everything the XS1 extractor learned the hard way over the summer was
