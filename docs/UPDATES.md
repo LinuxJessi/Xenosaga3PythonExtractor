@@ -5,46 +5,49 @@ to benefit from it. (Same convention as the Xenosaga I kit's
 `docs/UPDATES.md`; this file starts with the first improvement run ported
 back from that project.)
 
-## 2026-11-20 (fifth pass): the second pxy in maps; the three "unexplained" maps convert
+## 2026-11-20 (seventh pass) — first PCSX2 boots of discs the kit wrote
 
-**Maps carry a second pxy at header +0xD0** (`pxy.py`, `models_sweep.py`;
-[MODELS.md](MODELS.md#a-second-pxy-at-header-0xd0)). Header words
-0xC0..0xFF are eight (offset, size) slots. Slot 2 (+0xD0) points at a
-second, complete pxy inside the first. The game draws the first pxy and
-then this one (`FUN_00290590` calls `FUN_001a1d18` on both), and animates
-its node matrices with the `"PAM "` block in slot 7 (`FUN_0028d760`).
-It holds a map's moving parts: ships, rubble, crystals. 310 models have
-one, on every disc. The kit used to skip it, so those maps came out
-without their animated parts. It is now parsed, checked and exported
-under a node named after the inner pxy (rest pose; `PAM` is not decoded).
+Until now nothing written by the kit had been booted. Four USA builds were
+written into copies of the USA Disc 1 + Disc 2 pair (`patch_copy`, originals
+untouched) and **Disc 1** of each was booted in PCSX2 2.9.175 (macOS, fast
+boot), then loaded from a memory-card save (Vector S-Line Division, Sector 1)
+or started with New Game. Input went to PCSX2 by PID and screenshots were
+taken of the PCSX2 window; the test text is deliberately obvious.
 
-- `E3_HAK16.map`, `E3_HAK01_EV03.map` and `map\ev\E3_HAK01_EV03.pxy` were
-  this case with an empty outer pxy (0 draws, header triangles 0). All of
-  their mesh is the inner pxy: 20,244 and 576 triangles. They now convert
-  and pass, and Blender shows the HAK16 tree-tower floors and the
-  16-crystal ring.
-- Every disc (USA 1/2, Japan 1/2, May 2006 prototype): 1,609 models,
-  **1,589 ok**, 20 empty, **0 unexplained**, 0 failures. Triangles:
-  8,785,068 (USA), 8,786,499 (Japan), 8,785,114 (prototype). 779,435 of
-  them come from the +0xD0 pxys.
-- Before/after on USA Disc 1: 1,299 rows of `models.csv` are identical.
-  307 rows that were already ok gain exactly the inner pxy's triangles
-  (and its textures), with no new failures. The 3 unexplained rows are
-  now ok.
-- The 20 empty mesh slots are empty in the data. The 19 maps are 76-byte
-  files on every disc and expand to a 128-byte stub whose `pxy`, `txy` and
-  `id` slots all have size 0. `shion_sp01a.wpn` holds only a 9,344-byte
-  `xap` motion.
-- The "strips face one way" gate counts a triangle with an edge under
-  1e-5 of its longest edge as degenerate. This change is needed for the
-  crystal tips in the `E3_REN08`/`E3_REN09` inner pxys, and it changes no
-  other model's status.
-- The self-test's `E3_HAK16` disc check now expects `ok` with tris ==
-  header and a `.glb` written. `pxy.py --self-test` covers a +0xD0 pxy
-  and an empty outer shell.
+| # | build | command | booted | edit shown in game | capture |
+|---|---|---|---|---|---|
+| 1 | same-size English in `mnu\us\menutext.txd` (4 strings) | `text-import` | yes | memory-card slot list, load header, load prompt, field-menu entry | `xs3-ingame-english-memcard.png`, `xs3-ingame-english-menu.png` | 
+| 2 | Arabic, GeezaPro, 68 new proportional glyphs, right-aligned at `--width 300`: `synopsis.txd`, two `menutext.txd` strings, every speaker line in 398 `.sb` scenes, both fonts | `lang scan/encode/import --grow` (all rewrites in place, none appended) | yes | joined right-to-left Arabic on the synopsis screen, the field menu (label + help line) and in scene dialogue (Blue Testament, New Game opening) | `xs3-ingame-arabic-synopsis.png`, `xs3-ingame-arabic-menu.png`, `xs3-ingame-arabic-dialogue.png` |
+| 3 | Japanese on the USA disc, `--unlock jp`, donor font JP Disc 1 (57 slots, kanji from the USA font's own cells); `synopsis.txd`, `menutext.txd`, both patched executables, 45 re-coded files | `lang scan/encode/import --grow` | yes | kana, kanji and full-width punctuation on the synopsis screen and the field menu; retail `PlayStation®2` (Latin-1 `®`, re-coded under the unlock) still draws right | `xs3-ingame-japanese-unlock-synopsis.png`, `xs3-ingame-japanese-unlock-menu.png`, `xs3-ingame-japanese-unlock-latin1.png` |
+| 4 | `synopsis.txd` grown 46,700 → 47,195 bytes (allocation 47,104): appended past the old image end on both discs, Disc 1 padded 1,915,920 → 2,205,080 sectors | `text-import --grow` | yes | the longer synopsis from its new LBA; the field loads afterwards | `xs3-ingame-grown-synopsis.png` |
 
-**To benefit:** re-run `models` (or `model` for one map). Maps with
-animated parts now include them.
+All four: **PASS**. No hang, no black screen; each boot reached the title in
+about 45 seconds like the retail disc.
+
+**Kit bug found and fixed** (`langpack.py` `Drawable.bytes_for`, line 575):
+under `--unlock jp` a full-width space (U+3000) in a translation made
+`lang scan` refuse with "cannot be written on the USA build", because the
+unlocked-gate branch only accepted kanji rows B0-CF. It now writes A1A1 (cell
+0, the full-width space, which has no ink to check). The disc self-test still
+passes (25,200 display strings draw the same cells under the unlock).
+
+**Seen in game, not fixed:**
+* In right-aligned Arabic dialogue the page-wait marker (▼) is drawn where the
+  pen stops, i.e. at the right end of the line, against the first Arabic letter.
+  Cosmetic; a fix would put a space after the text or move the marker.
+* `--width 300` leaves right-aligned dialogue well short of the dialogue box's
+  right edge; the box is wider. The box width is still not measured.
+* Menu labels (`.txd`) are never padded, so an Arabic menu label sits at the
+  left of its slot. Expected (SCRIPTS.md § 3).
+
+**Still not booted:** Disc 2 and a disc swap, the Japanese discs, the
+prototype, subtitles, `batdat.bin` and the mnu databases, `.sb` files grown past
+their allocation, chain-1/2 and ISO9660-file appends, `--extend`,
+`--reclaim-latin`, pictures and `statfont`, a real PS2. Savestates were not
+used for any of this (they restore old text and fonts from RAM).
+
+**What you have to do:** nothing; re-run `lang scan` if a Japanese-on-USA
+translation was refused over a full-width space.
 
 ## 2026-11-20 (sixth pass) — UI-sheet palettes from the game code: titleobj, minigame, window sheets
 
@@ -108,6 +111,48 @@ data); a GS dump with those screens open would settle them.
 minigame and window PNGs change; itemcap/segcap/ctrl do not). Index PNGs
 are unchanged. Re-export with `xtx-export` before importing an RGBA edit of
 those three sheets (the sidecar plan changed).
+
+
+## 2026-11-20 (fifth pass): the second pxy in maps; the three "unexplained" maps convert
+
+**Maps carry a second pxy at header +0xD0** (`pxy.py`, `models_sweep.py`;
+[MODELS.md](MODELS.md#a-second-pxy-at-header-0xd0)). Header words
+0xC0..0xFF are eight (offset, size) slots. Slot 2 (+0xD0) points at a
+second, complete pxy inside the first. The game draws the first pxy and
+then this one (`FUN_00290590` calls `FUN_001a1d18` on both), and animates
+its node matrices with the `"PAM "` block in slot 7 (`FUN_0028d760`).
+It holds a map's moving parts: ships, rubble, crystals. 310 models have
+one, on every disc. The kit used to skip it, so those maps came out
+without their animated parts. It is now parsed, checked and exported
+under a node named after the inner pxy (rest pose; `PAM` is not decoded).
+
+- `E3_HAK16.map`, `E3_HAK01_EV03.map` and `map\ev\E3_HAK01_EV03.pxy` were
+  this case with an empty outer pxy (0 draws, header triangles 0). All of
+  their mesh is the inner pxy: 20,244 and 576 triangles. They now convert
+  and pass, and Blender shows the HAK16 tree-tower floors and the
+  16-crystal ring.
+- Every disc (USA 1/2, Japan 1/2, May 2006 prototype): 1,609 models,
+  **1,589 ok**, 20 empty, **0 unexplained**, 0 failures. Triangles:
+  8,785,068 (USA), 8,786,499 (Japan), 8,785,114 (prototype). 779,435 of
+  them come from the +0xD0 pxys.
+- Before/after on USA Disc 1: 1,299 rows of `models.csv` are identical.
+  307 rows that were already ok gain exactly the inner pxy's triangles
+  (and its textures), with no new failures. The 3 unexplained rows are
+  now ok.
+- The 20 empty mesh slots are empty in the data. The 19 maps are 76-byte
+  files on every disc and expand to a 128-byte stub whose `pxy`, `txy` and
+  `id` slots all have size 0. `shion_sp01a.wpn` holds only a 9,344-byte
+  `xap` motion.
+- The "strips face one way" gate counts a triangle with an edge under
+  1e-5 of its longest edge as degenerate. This change is needed for the
+  crystal tips in the `E3_REN08`/`E3_REN09` inner pxys, and it changes no
+  other model's status.
+- The self-test's `E3_HAK16` disc check now expects `ok` with tris ==
+  header and a `.glb` written. `pxy.py --self-test` covers a +0xD0 pxy
+  and an empty outer shell.
+
+**To benefit:** re-run `models` (or `model` for one map). Maps with
+animated parts now include them.
 
 ## 2026-11-20 (fourth pass) — item icons and thumbnails in one palette each, bidi = ICU, typed '$'
 

@@ -16,10 +16,14 @@ The kit ships no game data. **Use your own legally obtained discs only.**
 
 > **Beta — feedback wanted.** Please open issues at
 > <https://github.com/LinuxJessi/Xenosaga3PythonExtractor/issues>.
-> Reading is tested on all five images. **The write side (text import, new
-> scripts, fonts, pictures, grown files) is tested on disc copies and in
-> previews only: no disc built by this kit has been booted in PCSX2 yet.**
-> Treat your first boot as the real test, and tell us what you see.
+> Reading is tested on all five images. **Four kinds of disc written by the
+> kit have been booted in PCSX2 (2026-11-20) and show their edits in game:**
+> a same-size English menu edit, Arabic (new glyphs, right-to-left, scene
+> dialogue), Japanese on the USA disc with the `--unlock jp` executable patch,
+> and a text file grown past its allocation and appended (`--grow`). See
+> [docs/UPDATES.md](docs/UPDATES.md) for exactly what was booted. Everything
+> else on the write side (pictures, statfont, subtitles, Japanese discs, the
+> prototype) is still tested on disc copies only.
 
 ![KOS-MOS (mdl\chr\pc\C3kosmos00.chr, USA Disc 1) rendered by Blender from the .blend the kit writes](docs/images/xs3-kosmos-blender.png)
 
@@ -34,7 +38,20 @@ saved file.*
 
 *Arabic, Hindi and Japanese lines read back from patched copies of USA Disc 1
 and drawn with `lang preview` through that copy's own executable rules and
-rebuilt font. These are kit previews, not emulator captures.*
+rebuilt font. These are kit previews, not emulator captures; the PCSX2
+captures are below.*
+
+**In the game (PCSX2 captures, USA Disc 1 copies written by the kit):**
+
+| | |
+|---|---|
+| ![PCSX2 capture: Arabic dialogue in a scene's dialogue box (Blue Testament), written with lang import](docs/images/xs3-ingame-arabic-dialogue.png) | ![PCSX2 capture: Arabic "story so far" screen after loading a memory-card save](docs/images/xs3-ingame-arabic-synopsis.png) |
+| ![PCSX2 capture: Japanese on the USA disc with --unlock jp, the "story so far" screen](docs/images/xs3-ingame-japanese-unlock-synopsis.png) | ![PCSX2 capture: field menu with a Japanese first entry and help line on the USA disc](docs/images/xs3-ingame-japanese-unlock-menu.png) |
+| ![PCSX2 capture: same-size English edits in the memory-card menu](docs/images/xs3-ingame-english-memcard.png) | ![PCSX2 capture: a synopsis grown past its allocation and appended with --grow](docs/images/xs3-ingame-grown-synopsis.png) |
+
+*PCSX2 2.9.175 screenshots of copies built with `text-import`, `lang import`
+and `--grow`; the test text is deliberately obvious. Booted from a
+memory-card save (not a savestate), Disc 1 only.*
 
 ## Feature tour
 
@@ -116,7 +133,7 @@ cli.py region --iso X.iso -v` shows the profile and checks every address):
 | `Message.Dat` | 933 messages, u32 offsets, strings from 0x2800 | same layout | 871 messages, u16 offsets, strings from 0x800 |
 | Subtitles | `mono` allowed | as USA | no `mono`; `mov\jp\bat` files kept within 1 KiB (the developers' own note) |
 | Scenes | 715 `.sb` per disc | 886 text objects, as many as USA Disc 1 | 856 (140 of them JP-only, load status unknown) |
-| Write tests on copies | `text-import`, `lang import`, `patch` (in place and grown, pair and single) | `patch` same size | `text-import`, `patch` (in place and grown) |
+| Write tests on copies | `text-import`, `lang import`, `patch` (in place and grown, pair and single); **booted in PCSX2**: same-size, Arabic, `--unlock jp`, grown (Disc 1) | `patch` same size | `text-import`, `patch` (in place and grown); not booted |
 
 Give Disc 1 and Disc 2 of the same build. The writers refuse a mixed pair
 (USA + Japan, USA + prototype) and an unknown executable.
@@ -174,7 +191,8 @@ change log: [docs/UPDATES.md](docs/UPDATES.md); every document:
 * **A new GUI**, built from the command line itself, grouped by section, that
   finds your discs and tells USA, Japan and prototype images apart.
 
-Still open: nothing written by the kit has been booted in PCSX2; the loader
+Still open: only four USA Disc 1 builds have been booted in PCSX2 (see
+UPDATES.md), nothing on Disc 2, the Japanese discs or the prototype; the loader
 buffer sizes for text objects are unknown (so growth needs `--grow`); the
 `batdat.bin` string fields are structural, not traced in code; `.xap`
 animation and the `.xep` codec are not decoded; about a fifth of the art on

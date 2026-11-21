@@ -7,11 +7,13 @@ images are never written.
 Works on the USA retail discs (SLUS_213.89 / SLUS_214.17), the May 2006
 prototype, and the Japanese retail discs (SLPS_256.40 / SLPS_256.41).
 
-> **Nothing here has been checked in the game yet.** Every result below comes
-> from the kit's own tests: byte-identical round trips, read-back of the
-> patched copies, and the refusal cases. No patched image has been booted in
-> PCSX2 or on a PS2. Treat a patched image as untested until you have played
-> the edited scenes.
+> **Partly checked in the game (2026-11-20).** USA Disc 1 copies written by
+> `text-import` booted in PCSX2 2.9.175 and showed the edits: a same-size
+> `menutext.txd` edit, and a `synopsis.txd` grown past its allocation and
+> appended with `--grow` (captures and the table in [UPDATES.md](UPDATES.md)).
+> Everything else below comes from the kit's own tests (round trips, read-back
+> of the patched copies, refusals): Disc 2, the Japanese discs, subtitles,
+> `batdat.bin`, the mnu databases and grown `.sb` files have not been booted.
 
 ## The workflow
 
