@@ -177,8 +177,9 @@ change log: [docs/UPDATES.md](docs/UPDATES.md); every document:
 Still open: nothing written by the kit has been booted in PCSX2; the loader
 buffer sizes for text objects are unknown (so growth needs `--grow`); the
 `batdat.bin` string fields are structural, not traced in code; `.xap`
-animation and the `.xep` codec are not decoded; the flat UI parts of the
-window0-2 sheets and `titleobj` still have guessed or missing palettes.
+animation and the `.xep` codec are not decoded; about a fifth of the art on
+the window0-2 sheets (parts no draw found in the game code reaches) still has
+a ranked, not engine-bound, palette.
 
 ### Earlier: the 2026-09-24 improvement run
 

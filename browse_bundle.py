@@ -16,12 +16,12 @@ under the stage tree, with one of a handful of conversion strategies:
 * ``textures_png`` — decode ``.xtx``/``.tm2`` to PNG under ``textures_png/``.
                      Linear 32-bpp RGBA files decode directly; the 8
                      GS-swizzled 8-bpp files per disc are unswizzled and
-                     paletted from the CLUT tiles parked in the sheet (base
-                     palette + per-block chroma rescue: item icons, location
-                     thumbnails and portraits in true colour; flat UI parts
-                     of the window sheets still a guess, titleobj grayscale;
-                     see xtx_decode.py) plus a ``*_index.png`` ground-truth
-                     map.
+                     paletted from the CLUT tiles parked in the sheet, with
+                     the CLUT the game binds wherever a draw from the
+                     executable/overlays is known (engine_palettes.py: item
+                     icons, thumbnails, titleobj, minigame, ~78% of the
+                     window sheets; the rest ranked, see xtx_decode.py)
+                     plus a ``*_index.png`` ground-truth map.
 * ``package_textures`` — decode every texture that lives INSIDE another file:
                      the ``txy`` block of ``.chr`` / ``.wpn`` / ``.map``
                      MR packages (LZSS field maps decompressed on the fly)

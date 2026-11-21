@@ -24,8 +24,11 @@ SLUS_213.89 (decompile: xenosaga3-decompiled/decompiled/slus):
 ``base`` is the VRAM page variable DAT_004c83a2 (0x1c0 / 0xc0). Read relative to the
 sheet's base page in a 512-word (TBW 8) buffer (xtx_encode.cbp_xy), the three
 palettes are the canvas tiles (0,112), (384,112) and (16,112) of the sheet as
-xtx_encode and xtx_decode read it (pixels from 0x50, after the GS packet). The sheet upload itself was NOT traced; the reading is checked by
-the result: under those tiles every letter cell renders as a white glyph with a
+xtx_encode and xtx_decode read it (pixels from 0x50, after the GS packet). The sheet
+upload is FUN_001997d0 (2026-11-20, fifth pass): the XTX header is its descriptor, the
+"format" field at +0x12 is the destination buffer width (8 = TBW 8) and the image goes
+to page DAT_004c83a2, so the CBPs index the sheet's own canvas (engine_palettes.py has
+every other window-sheet draw). The reading was first checked by the result: under those tiles every letter cell renders as a white glyph with a
 dark outline exactly inside its [u, u+16) x [v, v+16) rect, the digits likewise,
 and the gauge bar of FUN_0023cfc8 (CBP 0x328, uv 180,54-226,65) as a clean bar;
 the tiles are byte-identical on the 384-word JP sheets.
