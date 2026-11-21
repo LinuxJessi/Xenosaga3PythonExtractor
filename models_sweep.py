@@ -344,7 +344,7 @@ def sweep_one(read, path, have=None, out_file=None, verify=True):
     row["layouts"] = " ".join("%s:%d" % kv for kv in sorted(r["layouts"].items()))
     row["batch_verts"] = r["vertices"]
     row["tris"] = r["triangles"]
-    row["header_tris"] = p.triangle_count
+    row["header_tris"] = pxy.header_triangles(p)
     row["joints"] = p.n_joint_matrices
     row["texture_unlinked"] = r.get("texture_unlinked", "")
     skinned = any(b.skin_mode for d in p.draws for b in d.batches)
@@ -356,13 +356,16 @@ def sweep_one(read, path, have=None, out_file=None, verify=True):
     else:
         row["xhr"] = "none"
     failed = list(r["failed"])
+    if p.child is not None:
+        row["notes"] = "pxy at +0xD0: %d triangles" % r["child_triangles"]
     if not r["triangles"]:
-        # a full pxy that decodes to nothing (E3_HAK16.map, E3_HAK01_EV03):
-        # not understood, so not "ok", and no (invalid, empty) glb
+        # a non-empty pxy that decodes to nothing, neither itself nor at
+        # +0xD0 (none on any disc since the +0xD0 pxy is read): not "ok",
+        # and no (invalid, empty) glb
         row["status"] = "unexplained"
         row["failed"] = "; ".join(failed + [
             "%d draws, 0 triangles decoded from a %d-byte pxy with %d "
-            "materials; no glb written" % (len(p.draws), p.size,
+            "materials; no glb written" % (len(pxy.all_draws(p)), p.size,
                                            len(p.materials))])
         return row
     try:
@@ -382,10 +385,12 @@ def sweep_one(read, path, have=None, out_file=None, verify=True):
                     nv += js["accessors"][pr["attributes"]["POSITION"]]["count"]
             row["verts"] = nv
             row["textures"] = len(js.get("images", ()))
-            row["notes"] = "; ".join(js.get("extras", {}).get("warnings", ()))
-            if nt != p.triangle_count:
+            row["notes"] = "; ".join(
+                ([row["notes"]] if row["notes"] else [])
+                + list(js.get("extras", {}).get("warnings", ())))
+            if nt != pxy.header_triangles(p):
                 failed.append("glb triangles %d != header %d"
-                              % (nt, p.triangle_count))
+                              % (nt, pxy.header_triangles(p)))
             if skinned:
                 worst = 0.0
                 for i, nd in enumerate(js["nodes"]):
@@ -555,8 +560,9 @@ def _cmd_model(a):
         return 2
     if glb is None and p is not None:
         print("%s: pxy %.2f, %d draws, 0 triangles from a %d-byte pxy with %d "
-              "materials -- this layout is not understood; no glb written"
-              % (a.path, p.version, len(p.draws), p.size, len(p.materials)))
+              "materials (nor at +0xD0); no glb written"
+              % (a.path, p.version, len(pxy.all_draws(p)), p.size,
+                 len(p.materials)))
         return 1
     if glb is None:
         print("%s: empty pxy slot (no mesh in this package)" % a.path)
@@ -566,9 +572,12 @@ def _cmd_model(a):
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(glb)
     print("%s: pxy %.2f, %d draws, %d triangles (header %d), layouts %s, "
-          "%d joint matrices" % (a.path, p.version, len(p.draws),
-                                 r["triangles"], p.triangle_count,
+          "%d joint matrices" % (a.path, p.version, len(pxy.all_draws(p)),
+                                 r["triangles"], pxy.header_triangles(p),
                                  r["layouts"], p.n_joint_matrices))
+    if p.child is not None:
+        print("  of which the pxy at +0xD0 (%r): %d draws, %d triangles"
+              % (p.child.name, len(p.child.draws), r["child_triangles"]))
     print("  checks: %s" % ("all pass" if not r["failed"]
                             else "; ".join(r["failed"])))
     print("wrote %s (%d bytes)" % (out, len(glb)))
@@ -726,17 +735,20 @@ def _env_disc_checks():
             print("%s %s: %s: %d texture entries, %d all-zero %s" % (
                 "ok  " if ok else "FAIL", env, path, len(dec), len(empty), empty[:3]))
             fails += not ok
-        # a full-size pxy that decodes to no draw must not pass as "ok"
+        # E3_HAK16.map has no draw of its own: its whole mesh is the pxy at
+        # header +0xD0 (36 nodes, 20,244 triangles on USA Disc 1)
         path = "\\mdl\\map\\cf\\E3_HAK16.map"
         if norm_path(path) in have:
             import tempfile
             with tempfile.TemporaryDirectory() as td:
                 g = Path(td) / "h.glb"
                 row = sweep_one(src, path, have, g)
-                ok = row["status"] == "unexplained" and not g.exists()
-            print("%s %s: %s: status %s, glb written: %s" % (
-                "ok  " if ok else "FAIL", env, path, row["status"],
-                bool(row["glb"])))
+                ok = (row["status"] == "ok" and row["tris"] == row["header_tris"]
+                      and row["tris"] > 0 and g.exists())
+            print("%s %s: %s: status %s, %s tris (header %s, all from the "
+                  "pxy at +0xD0), glb written: %s" % (
+                      "ok  " if ok else "FAIL", env, path, row["status"],
+                      row["tris"], row["header_tris"], bool(row["glb"])))
             fails += not ok
     return fails, any_disc
 

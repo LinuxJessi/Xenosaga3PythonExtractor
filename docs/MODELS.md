@@ -52,6 +52,18 @@ and its own size field equals the directory size (**number**: all 1,589
 non-empty packages parse with that rule). 20 packages have an empty
 (size 0) `pxy` slot: 19 field maps and `shion_sp01a.wpn`.
 
+**The 20 empty slots are empty in the data, not a decoder miss**
+(**number**, 2026-11-20). The 19 maps (`E3_CIT11`, `E3_DOU10`-`12`,
+`E3_ELS10`, `E3_MOR10`-`13`, `E3_MUJ02`/`03`, `E3_SYU13`, `E3_UMD09`/`10`,
+`E3_ZCF01`/`02`/`09`/`10`/`11`) are 76-byte files on every disc (both USA
+discs, both Japan discs, the prototype). Each expands to 128 bytes: the
+0x40-byte pre-header plus a directory naming `pxy`, `txy` and `id`, all
+three with size 0. Past that there are no bytes at all, so nothing is
+skipped. No other file on the disc carries these stems.
+`shion_sp01a.wpn` is 9,472 bytes. Its `pxy`, `txy`, `xhr` and `epf` slots
+are size 0, and its only data is a 9,344-byte `xap` (motion). It is a
+motion-only weapon package.
+
 The `.pxy` is the full render mesh, not a proxy or collision mesh (the
 decoded meshes are the textured characters and rooms; **image**).
 
@@ -114,6 +126,64 @@ proven: materials are double-sided.
 
 **Batch limits** (**number**): n <= 30 in all three layouts (the Episode
 II limit); kinds 0 and 3 in all three.
+
+## A second pxy at header +0xD0
+
+Header words 0xC0..0xFF are eight (offset, size) slots. Three are used:
+
+| slot | header | holds | code |
+|---|---|---|---|
+| 0 | +0xC0 | a `"WAT "` block (count at +8, 0x110-byte records) | `FUN_0024e2c8` -> `FUN_0024d478` checks the tag |
+| 2 | +0xD0 | the offset of a **second, complete pxy** inside this one (size word 0) | below |
+| 7 | +0xF8 | a `"PAM "` block | `FUN_0028d760` |
+
+(**code**) `FUN_00290590` calls the pxy draw function `FUN_001a1d18`
+on the model's pxy and then, when `*(pxy + 0xD0) != 0`, on
+`pxy + *(pxy + 0xD0)`. `FUN_0024e678` and `FUN_0024e758` copy that inner
+pxy's node matrices (count at its +0x60, table at its +0x68) to and from a
+run-time buffer. `FUN_0028d760` hands the same table, together with the
+`"PAM "` block at the outer +0xF8, to the motion player (its asserts name
+`pAct->motionPack`). So the inner pxy is the map's animated part, drawn
+after the static one. Its node names say the same thing: `anim_*`, ships
+(`anim_senkan01`, `elsa_body`), rubble (`gareki`), crystals
+(`rk_ca1g*`, `anim_cristal_*`).
+
+(**number**, every disc) 310 models have one: all are field or battle
+maps, or standalone `map\ev\*.pxy`. On all 310 the inner pxy ends exactly
+at the end of the outer one and has no +0xD0 of its own. Its header and
+decoded triangle counts agree, and it passes every gate. It links every
+textured material batch to the package's own txy (0 unlinked) and is never
+skinned. Together they hold 779,435 triangles.
+The kit used to ignore the inner pxy, so those 310 models came out without
+their animated parts.
+
+The three models that used to be "unexplained" are this case with an
+empty outer pxy. `map\cf\E3_HAK16.map` has an outer pxy with 0 draws, 0
+items, header triangles 0 and an inverted bounding box (min +1e5, max
+-1e5). Its inner pxy, named `E3_HAK16` and at 0x2420, holds the whole
+map: 61 draws, 20,244 triangles, layouts F 56 / U 2,436, nodes `BG`,
+`hashira`, `yuka01`-`04`, `anim_koa01`-`06` and crystals. The outer pxy
+of `map\cf\E3_HAK01_EV03.map` is named `test`, and its standalone
+`map\ev\E3_HAK01_EV03.pxy` is byte-identical to the one in the map.
+Its inner pxy, also named `test` and at 0x690, holds 32 draws and 576
+triangles: a ring of 16 crystals, `rk_ca1g01`-`16`.
+
+Export: the inner pxy's meshes sit under one node named after the inner
+pxy (its own name field), with `extras.pxy_at`. The glb's top-level
+`extras.pxy_at_0xD0` gives its offset, name, triangle and draw counts.
+Node matrices are the rest values. The `"PAM "` motion and the `"WAT "`
+block are not decoded. In Blender (**image**), `E3_HAK16` without its
+`BG` shell shows the stacked organic floors around the trunk, crystals
+on the floors, all textured. `E3_HAK01_EV03` shows the 16-crystal ring.
+`E3_HAK01` shows its ships and rubble in place.
+
+**Degenerate slivers.** The "strips face one way" gate now treats a
+triangle as degenerate when its shortest edge is under 1e-5 of its
+longest edge. The crystal tips in the `E3_REN08`/`E3_REN09` inner pxys
+repeat a vertex up to 2e-6 apart. Those slivers face either way at
+random: every minority-facing crystal triangle had such an edge, and with
+them counted the two files scored 93/104 and 153/210 strips. No other
+model changes status, and every check-failed count stays 0.
 
 **Material batches** are the Episode II layout unchanged (shader id, SW
 and TW, TEX0, CLAMP, ALPHA); 230,642 textured material batches on Disc 1.
@@ -189,25 +259,28 @@ slot past a list still raises.
 `python cli.py models --iso D1 --iso D2 --iso PROTO --out ...` (about
 100 s per disc on 8 cores), each disc:
 
-* 1,609 models: 1,586 decode, pass every check, write a `.glb` and read
-  it back; 20 have an empty pxy slot; 3 are "unexplained": a non-empty
-  pxy that decodes to 0 draws and 0 triangles, so no `.glb` is written
-  (`map\cf\E3_HAK01_EV03.map`, `map\cf\E3_HAK16.map`,
-  `map\ev\E3_HAK01_EV03.pxy`); 0 decode failures, 0 check failures
-  (re-run 2026-11-20 on USA Disc 1 and Japan Disc 1).
-* Decoded triangle count == header triangle count in all 1,586, and the
-  read-back `.glb` has the same count.
-* Files per layout: F 1,308, Q 61, U 428 (Japan Disc 1: F 1,307, Q 62,
-  U 428).
-* Triangles: 8,005,633 (USA Disc 1 and Disc 2), 8,005,679 (prototype:
-  `map\bat\KYO_B02.map` and `map\cf\E3_KYO06.map` differ, every other
-  model decodes to the same counts).
+* 1,609 models: 1,589 decode, pass every check, write a `.glb` and read
+  it back; 20 have an empty pxy slot (empty in the data, see above); 0
+  unexplained, 0 decode failures, 0 check failures. Re-run 2026-11-20 on
+  all five discs (USA 1/2, Japan 1/2, prototype) with the same counts.
+  310 of the 1,589 include a pxy at +0xD0.
+* Decoded triangle count == header triangle count (outer + +0xD0) in all
+  1,589, and the read-back `.glb` has the same count.
+* Files per layout: F 1,354, Q 61, U 431 (Japan: F 1,353, Q 62, U 431).
+* Triangles: 8,785,068 (USA Disc 1 and Disc 2), 8,785,114 (prototype),
+  8,786,499 (Japan Disc 1 and Disc 2). 779,435 of them are in +0xD0 pxys,
+  the same on every disc. The prototype differs from USA in
+  `map\bat\KYO_B02.map` and `map\cf\E3_KYO06.map`. Before the +0xD0
+  pxy was read, the USA total was 8,005,633.
 * Textured material batches unlinked: 0. Vertices outside their item
   box or sphere: 0. Weight rows not summing to 1: 0.
 * Skinned: 1,014; skinned rest-pose error at most 2.2e-6.
-* Facing (layouts F/Q): 2,459,461 of 2,491,810 non-degenerate triangles
-  agree with their vertex normals; 531,122 of 533,251 strips face one
-  way.
+* Facing (layouts F/Q, USA Disc 1, with the sliver rule):
+  2,556,868 of 2,591,110 non-degenerate triangles agree with their
+  vertex normals; 555,919 of 558,268 strips face one way. Without the
+  +0xD0 pxys the figures are 2,459,402 of 2,491,733 and 531,116 of
+  533,236 (2,459,461 / 2,491,810 and 531,122 / 533,251 before the sliver
+  rule).
 
 A model passes only if it decodes without any structural surprise
 (unknown layout, VIF command, UNPACK flag, address, skin mode, palette
@@ -219,7 +292,8 @@ the header's triangle count and, when skinned, a rest pose within 1e-5.
 
 Blender (**image**): headless imports into Blender 5.4 of KOS-MOS
 (28 meshes + armature of 76 joints, 53 images), `kosmos_lc01.wpn`,
-`E3_ELS01.map` (14,921 triangles, 67 images, unlit), `mnu\umn.pxy` and
+`E3_ELS01.map` (14,921 triangles of its outer pxy, 67 images, unlit; it
+also has a +0xD0 pxy, added since), `mnu\umn.pxy` and
 `E3obj287` finish without error with the expected triangle counts.
 Software renders of KOS-MOS, Allen and `E3_ELS01` looked right.
 
@@ -235,7 +309,8 @@ Software renders of KOS-MOS, Allen and `E3_ELS01` looked right.
   slot-63 joint of `E3obj287` / `M3_npcr15`.
 * Colour scale (128 = 1.0, clipped above), alpha modes (the Episode II
   group rule), handedness: not checked against the running game.
-* Japan Disc 1 was swept (2026-11-20): 1,586 ok, 20 empty, the same 3
-  unexplained, 8,007,064 triangles (USA 8,005,633), header == decoded in
-  every model, 1,014 skinned. Which models differ from USA was not
-  broken down; Japan Disc 2 was not swept.
+* The `"PAM "` motion of the +0xD0 pxy (its animated parts are exported
+  at rest) and the `"WAT "` block (slot 0; count 0 in `E3_HAK16` and
+  `E3_HAK01_EV03`). Slots 1 and 3-6 are zero in every model on Disc 1.
+* Which models differ between Japan and USA was not broken down (Japan:
+  8,786,499 triangles against USA 8,785,068).

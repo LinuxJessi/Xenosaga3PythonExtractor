@@ -26,6 +26,10 @@ Changed for Episode III (proof: docs/MODELS.md, and the survey sweep):
   The glTF gets COLOR_0 (baked lighting, 128 = 1.0), no NORMAL, and a
   KHR_materials_unlit material; the facing turn and the "strips face one
   way" check need vertex normals and are skipped for these batches.
+* A second, complete pxy can sit inside the first at the offset in header
+  word +0xD0 (310 maps; the engine draws both, FUN_00290590).  `parse`
+  reads it as `p.child`; `check` and `to_glb` include it;
+  `header_triangles` / `all_draws` cover both.
 * `_decode_draw` accepts a signed UNPACK for V4-16 (layout Q) only.
 * Textures come from a `TextureSet` (below), which decodes through the
   Episode III kit's chrtex.py (package txy blocks, standalone `.txy`, and
@@ -304,7 +308,41 @@ def parse(buf, decode=True):
     if decode:
         for d in p.draws:
             _decode_draw(buf, p, d)
+    # Episode III: header words 0xC0..0xFF are eight (offset, size) slots.
+    # Slot 2 (+0xD0) is the offset of a second, complete pxy inside this
+    # one; the engine draws this pxy, then that one (FUN_00290590 calls the
+    # draw function FUN_001a1d18 on `pxy` and on `pxy + *(pxy + 0xD0)`),
+    # and FUN_0028d760 / FUN_0024e678 drive its node matrices (+0x60 count,
+    # +0x68 table) from the "PAM " block that slot 7 (+0xF8) points at.
+    # Slot 0 (+0xC0) is the "WAT " block (FUN_0024e2c8 -> FUN_0024d478).
+    p.child = None
+    p.child_offset = 0
+    if len(buf) >= 0x100:
+        p.ext_slots = struct.unpack_from("<16I", buf, 0xC0)
+        co = p.ext_slots[4]
+        if co:
+            if co + 0x10 > len(buf) or buf[co:co + 4] != b"pxy\0":
+                raise PxyError("header +0xD0 = %#x: no pxy there" % co)
+            csize, = struct.unpack_from("<I", buf, co + 12)
+            if co + csize > len(buf):
+                raise PxyError("pxy at +0xD0 (%#x, %#x bytes) runs past the "
+                               "file" % (co, csize))
+            p.child = parse(buf[co:co + csize], decode)
+            p.child_offset = co
+            if p.child.child is not None:
+                raise PxyError("pxy at +0xD0 has its own +0xD0 pxy "
+                               "(never seen)")
     return p
+
+
+def header_triangles(p):
+    """Header triangle count of a pxy plus that of its +0xD0 pxy."""
+    return p.triangle_count + (p.child.triangle_count if p.child else 0)
+
+
+def all_draws(p):
+    """The draws of a pxy, then those of its +0xD0 pxy."""
+    return list(p.draws) + (list(p.child.draws) if p.child else [])
 
 
 def _decode_draw(buf, p, d):
@@ -676,7 +714,13 @@ def check(p, txy_entries=None):
                 g = np.cross(P[tris[:, 1]] - P[tris[:, 0]],
                              P[tris[:, 2]] - P[tris[:, 0]])
                 gl = np.linalg.norm(g, axis=1)
-                ok = gl > 1e-12
+                # degenerate: no area, or an edge collapsed to float noise
+                # (crystal tips in E3_REN08/09 repeat a vertex up to 2e-6
+                # apart, and those slivers face either way at random)
+                el = np.stack([np.linalg.norm(P[tris[:, a]] - P[tris[:, c]],
+                                              axis=1)
+                               for a, c in ((0, 1), (1, 2), (2, 0))], axis=1)
+                ok = (gl > 1e-12) & (el.min(axis=1) > 1e-5 * el.max(axis=1))
             if len(tris) and b.nrm is not None:
                 vn = b.nrm[tris].sum(axis=1)
                 dall = (g * vn).sum(axis=1)
@@ -726,6 +770,7 @@ def check(p, txy_entries=None):
         for b in d.batches:
             lay[b.layout] = lay.get(b.layout, 0) + 1
     r["layouts"] = lay
+    r["header_triangles"] = p.triangle_count
     if r["triangles"] != p.triangle_count:
         r["failed"].append("triangle count %d != header %d"
                            % (r["triangles"], p.triangle_count))
@@ -767,6 +812,21 @@ def check(p, txy_entries=None):
         if size_bad:
             r["failed"].append("%d material batches disagree with the .txy "
                                "entry size" % size_bad)
+    if p.child is not None:
+        # the +0xD0 pxy: same gates, its own header count; counters add up
+        # (the package's one txy serves both: 0 unlinked on every disc)
+        rc = check(p.child, txy_entries)
+        r["child_triangles"] = rc["triangles"]
+        for k, v in rc.items():
+            if k == "failed":
+                r["failed"] += ["pxy at +0xD0: " + f for f in v]
+            elif k == "layouts":
+                for lk, lv in v.items():
+                    r["layouts"][lk] = r["layouts"].get(lk, 0) + lv
+            elif k == "uv_abs_max":
+                r[k] = max(r[k], v)
+            elif isinstance(v, (int, np.integer)) and not isinstance(v, bool):
+                r[k] = r.get(k, 0) + v
     return r
 
 
@@ -912,13 +972,15 @@ def to_glb(p, textures=None, x=None, name=None):
     """Serialise a parsed .pxy.  `textures`: a `TextureSet` (or the bytes
     of a standalone .txy); `x`: a parsed .xhr (skeleton hierarchy)."""
     import gltf
-    if not p.draws:
-        # e.g. E3_HAK16.map / E3_HAK01_EV03.pxy: a full-size pxy (materials,
-        # a txy, data past the ext2 offset) that decodes to no draw at all.
-        # An empty glb would be invalid glTF and would pass for "ok".
-        raise PxyError("no draws decoded (%d-byte pxy, %d materials): this "
-                       "layout is not understood, nothing to write"
+    if not all_draws(p):
+        # (E3_HAK16.map / E3_HAK01_EV03 have no draw of their own: all their
+        # mesh is the +0xD0 pxy.)  An empty glb would be invalid glTF.
+        raise PxyError("no draws in this pxy or at +0xD0 (%d-byte pxy, %d "
+                       "materials): nothing to write"
                        % (p.size, len(p.materials)))
+    if p.child is not None and any(b.skin_mode for d in p.child.draws
+                                   for b in d.batches):
+        raise PxyError("skinned batch in the pxy at +0xD0 (never seen)")
     g = gltf.GlbBuilder("Xenosaga3PythonExtractor pxy.py")
     warnings = []
     # ---- textures
@@ -927,8 +989,10 @@ def to_glb(p, textures=None, x=None, name=None):
         textures = txy_textures(bytes(textures))
     if textures is not None:
         link_textures(p, textures.entries)
+        if p.child is not None:
+            link_textures(p.child, textures.entries)
         used = {}
-        for d in p.draws:
+        for d in all_draws(p):
             for m in d.materials:
                 if m.txy_entry is not None:
                     used[m.txy_entry["i"]] = m.txy_entry
@@ -1008,111 +1072,133 @@ def to_glb(p, textures=None, x=None, name=None):
         joint_nodes.append(root_joint)          # for unskinned batches
         ibm.append(IDENT)
         skin = g.add_skin(p.name or "skin", joint_nodes, ibm, root_joint)
-    # ---- meshes, one per node
-    by_node = {}
-    for d in p.draws:
-        if d.batches:
-            by_node.setdefault(d.node if d.node is not None else 0,
-                               []).append(d)
-    n_tris = 0
-    for node_i in sorted(by_node):
-        prims = {}
-        for d in by_node[node_i]:
-            for b in d.batches:
-                prims.setdefault(material(d, b.material, b.unlit),
-                                 []).append((d, b))
-        out = []
-        node_skinned = False
-        for mat, lst in sorted(prims.items()):
-            P, N, UV, COL, J, W, IDX = [], [], [], [], [], [], []
-            base = 0
-            any_color = False
-            unlit = lst[0][1].unlit        # one material key = one layout kind
-            for d, b in lst:
-                st = b.material
-                P.append(b.pos)
-                N.append(b.nrm if b.nrm is not None else np.zeros((b.n, 3)))
-                if st is not None and st.sw > 0 and st.tw > 0:
-                    UV.append(b.st / (st.sw, st.tw))
-                else:
-                    UV.append(b.st)
-                if b.colors is None:
-                    c = np.full((b.n, 4), 128.0)
-                else:
-                    c = np.broadcast_to(b.colors.astype(np.float64),
-                                        (b.n, 4))
-                    any_color = True
-                COL.append(np.clip(c / 128.0, 0.0, 1.0))
-                if skinned:
-                    if b.skin_mode:
-                        jm, w = batch_joints(p, node_i, b)
-                        ws = w.sum(axis=1, keepdims=True)
-                        w = w / np.where(ws == 0, 1, ws)
-                        jm = np.where(w > 0, jm, 0)
-                        free = ws[:, 0] == 0        # rigid, byte 255
-                        jm[free, 0] = p.n_joint_matrices
-                        w[free, 0] = 1.0
+    def emit(p, root=True, skinned=skinned):
+        """Meshes of one pxy, one per node; returns (triangles, glTF
+        node indices).  `p` shadows the outer one on purpose; the +0xD0
+        pxy is emitted with root=False, skinned=False."""
+        added = []
+        by_node = {}
+        for d in p.draws:
+            if d.batches:
+                by_node.setdefault(d.node if d.node is not None else 0,
+                                   []).append(d)
+        n_tris = 0
+        for node_i in sorted(by_node):
+            prims = {}
+            for d in by_node[node_i]:
+                for b in d.batches:
+                    prims.setdefault(material(d, b.material, b.unlit),
+                                     []).append((d, b))
+            out = []
+            node_skinned = False
+            for mat, lst in sorted(prims.items()):
+                P, N, UV, COL, J, W, IDX = [], [], [], [], [], [], []
+                base = 0
+                any_color = False
+                unlit = lst[0][1].unlit        # one material key = one layout kind
+                for d, b in lst:
+                    st = b.material
+                    P.append(b.pos)
+                    N.append(b.nrm if b.nrm is not None else np.zeros((b.n, 3)))
+                    if st is not None and st.sw > 0 and st.tw > 0:
+                        UV.append(b.st / (st.sw, st.tw))
                     else:
-                        jm = np.zeros((b.n, 4), dtype=np.int64)
-                        jm[:, 0] = p.n_joint_matrices
-                        w = np.zeros((b.n, 4))
-                        w[:, 0] = 1.0
-                    J.append(jm)
-                    W.append(w)
-                    node_skinned = True
-                tris = b.triangles()
-                if len(tris) and not b.unlit:
-                    # the engine draws these two-sided and the strips'
-                    # facing is not reliable (see docs/MODELS.md): turn
-                    # each triangle to face along its vertex normals
-                    # (layout U has none: strip-parity winding is kept)
-                    gn = np.cross(b.pos[tris[:, 1]] - b.pos[tris[:, 0]],
-                                  b.pos[tris[:, 2]] - b.pos[tris[:, 0]])
-                    back = (gn * b.nrm[tris].sum(axis=1)).sum(axis=1) < 0
-                    tris[back] = tris[back][:, [1, 0, 2]]
-                IDX.append(tris + base)
-                base += b.n
-            idx = np.concatenate(IDX)
-            if not len(idx):
+                        UV.append(b.st)
+                    if b.colors is None:
+                        c = np.full((b.n, 4), 128.0)
+                    else:
+                        c = np.broadcast_to(b.colors.astype(np.float64),
+                                            (b.n, 4))
+                        any_color = True
+                    COL.append(np.clip(c / 128.0, 0.0, 1.0))
+                    if skinned:
+                        if b.skin_mode:
+                            jm, w = batch_joints(p, node_i, b)
+                            ws = w.sum(axis=1, keepdims=True)
+                            w = w / np.where(ws == 0, 1, ws)
+                            jm = np.where(w > 0, jm, 0)
+                            free = ws[:, 0] == 0        # rigid, byte 255
+                            jm[free, 0] = p.n_joint_matrices
+                            w[free, 0] = 1.0
+                        else:
+                            jm = np.zeros((b.n, 4), dtype=np.int64)
+                            jm[:, 0] = p.n_joint_matrices
+                            w = np.zeros((b.n, 4))
+                            w[:, 0] = 1.0
+                        J.append(jm)
+                        W.append(w)
+                        node_skinned = True
+                    tris = b.triangles()
+                    if len(tris) and not b.unlit:
+                        # the engine draws these two-sided and the strips'
+                        # facing is not reliable (see docs/MODELS.md): turn
+                        # each triangle to face along its vertex normals
+                        # (layout U has none: strip-parity winding is kept)
+                        gn = np.cross(b.pos[tris[:, 1]] - b.pos[tris[:, 0]],
+                                      b.pos[tris[:, 2]] - b.pos[tris[:, 0]])
+                        back = (gn * b.nrm[tris].sum(axis=1)).sum(axis=1) < 0
+                        tris[back] = tris[back][:, [1, 0, 2]]
+                    IDX.append(tris + base)
+                    base += b.n
+                idx = np.concatenate(IDX)
+                if not len(idx):
+                    continue
+                cols = [np.concatenate(P), np.concatenate(N), np.concatenate(UV),
+                        np.concatenate(COL)]
+                if skinned:
+                    cols += [np.concatenate(J), np.concatenate(W)]
+                first_i, inv = _weld(cols)
+                tri = inv[idx]
+                # degenerate triangles are kept: the count then equals the file's own
+                n_tris += len(tri)
+                nrm = cols[1][first_i]
+                ln = np.linalg.norm(nrm, axis=1, keepdims=True)
+                nrm = np.where(ln > 1e-6, nrm / np.where(ln == 0, 1, ln),
+                               [0.0, 0.0, 1.0])
+                prim = dict(positions=cols[0][first_i],
+                            normals=None if unlit else nrm,
+                            uvs=cols[2][first_i], indices=tri.reshape(-1),
+                            material=mat)
+                if any_color or unlit:
+                    prim["colors"] = cols[3][first_i]
+                if skinned:
+                    prim["joints"] = cols[4][first_i]
+                    prim["weights"] = cols[5][first_i]
+                out.append(prim)
+            if not out:
                 continue
-            cols = [np.concatenate(P), np.concatenate(N), np.concatenate(UV),
-                    np.concatenate(COL)]
-            if skinned:
-                cols += [np.concatenate(J), np.concatenate(W)]
-            first_i, inv = _weld(cols)
-            tri = inv[idx]
-            # degenerate triangles are kept: the count then equals the file's own
-            n_tris += len(tri)
-            nrm = cols[1][first_i]
-            ln = np.linalg.norm(nrm, axis=1, keepdims=True)
-            nrm = np.where(ln > 1e-6, nrm / np.where(ln == 0, 1, ln),
-                           [0.0, 0.0, 1.0])
-            prim = dict(positions=cols[0][first_i],
-                        normals=None if unlit else nrm,
-                        uvs=cols[2][first_i], indices=tri.reshape(-1),
-                        material=mat)
-            if any_color or unlit:
-                prim["colors"] = cols[3][first_i]
-            if skinned:
-                prim["joints"] = cols[4][first_i]
-                prim["weights"] = cols[5][first_i]
-            out.append(prim)
-        if not out:
-            continue
-        nd = p.nodes[node_i] if node_i < len(p.nodes) else None
-        nm = nd.name if nd is not None and nd.name else "node%d" % node_i
-        mesh = g.add_mesh(nm, out)
-        if node_skinned:
-            g.add_node(nm, mesh=mesh, skin=skin, root=True)
-        else:
-            g.add_node(nm, mesh=mesh, root=True,
-                       matrix=nd.matrix.T if nd is not None else None)
+            nd = p.nodes[node_i] if node_i < len(p.nodes) else None
+            nm = nd.name if nd is not None and nd.name else "node%d" % node_i
+            mesh = g.add_mesh(nm, out)
+            if node_skinned:
+                added.append(g.add_node(nm, mesh=mesh, skin=skin, root=root))
+            else:
+                added.append(g.add_node(
+                    nm, mesh=mesh, root=root,
+                    matrix=nd.matrix.T if nd is not None else None))
+        return n_tris, added
+
+    n_tris, _ = emit(p)
+    child_info = None
+    if p.child is not None:
+        c = p.child
+        c_tris, c_nodes = emit(c, False, False) if c.draws else (0, [])
+        n_tris += c_tris
+        if c_nodes:
+            # grouped under one node named after the inner pxy's own name
+            g.add_node(c.name or "pxy", children=c_nodes, root=True,
+                       extras={"pxy_at": "0x%x" % p.child_offset,
+                               "triangles": c_tris})
+        child_info = {"offset": p.child_offset, "name": c.name,
+                      "triangles": c_tris, "draws": len(c.draws)}
     if n_tris == 0 or not g.meshes:
         raise PxyError("%d draws decoded but no triangles (%d-byte pxy): "
                        "nothing to write" % (len(p.draws), p.size))
     g.extras = {"source": p.name, "pxy_version": round(float(p.version), 2),
                 "pxy_flags": p.flags, "triangles": n_tris,
                 "warnings": warnings}
+    if child_info is not None:
+        g.extras["pxy_at_0xD0"] = child_info
     return g.to_bytes(name or p.name or "pxy")
 
 
@@ -1350,8 +1436,40 @@ def self_test():
         pass
     else:
         raise AssertionError("parse accepted a stray VIF command")
+    # a second pxy at header +0xD0 (Episode III maps): parsed, checked and
+    # exported with the first; an outer pxy with no draw of its own (the
+    # E3_HAK16 shape) still converts through it
+    data3 = _synthetic(False, xs3=True)[0]
+    outer = bytearray(data3) + data3
+    struct.pack_into("<I", outer, 12, len(outer))
+    struct.pack_into("<I", outer, 0xD0, len(data3))
+    po = parse(bytes(outer))
+    assert po.child is not None and po.child_offset == len(data3)
+    assert header_triangles(po) == 14 and len(all_draws(po)) == 4
+    ro = check(po, entries)
+    assert not ro["failed"], ro["failed"]
+    assert ro["triangles"] == 14 and ro["child_triangles"] == 7
+    assert ro["layouts"] == {"F": 2, "Q": 2, "U": 2}
+    jso, _ = gltf.read_glb(to_glb(po, None))
+    assert jso["extras"]["pxy_at_0xD0"]["triangles"] == 7
+    assert sum(jso["accessors"][pr["indices"]]["count"] // 3
+               for m in jso["meshes"] for pr in m["primitives"]) == 14
+    shell = bytearray(outer)
+    struct.pack_into("<I", shell, 0x30 + 8 * 4, 0)       # outer: no draws
+    struct.pack_into("<I", shell, 0x30 + 6 * 4, 0)       # ... and no items
+    struct.pack_into("<I", shell, 0x30 + 3 * 4, len(data3))  # draw list at end
+    struct.pack_into("<I", shell, 0x30 + 7 * 4, len(data3))  # VIF empty
+    struct.pack_into("<I", shell, 0xB4, 0)
+    ps = parse(bytes(shell))
+    assert not ps.draws and header_triangles(ps) == 7
+    rs = check(ps)
+    assert not rs["failed"] and rs["triangles"] == 7, rs["failed"]
+    jss, _ = gltf.read_glb(to_glb(ps))
+    assert sum(jss["accessors"][pr["indices"]]["count"] // 3
+               for m in jss["meshes"] for pr in m["primitives"]) == 7
     print("pxy self-test ok (layout F skinned + static, layout Q quantized, "
-          "layout U unlit, checks, glb read-back, damage rejection)")
+          "layout U unlit, pxy at +0xD0, checks, glb read-back, damage "
+          "rejection)")
     return 0
 
 
