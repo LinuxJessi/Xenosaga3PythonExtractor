@@ -3,90 +3,196 @@
 By Jessi Ray Godsibb. Originally bootstrapped with ChatGPT; rebuilt around the
 corrected disc model.
 
-Unpack, browse and mod **Xenosaga Episode III — Also sprach Zarathustra** (PS2)
-with nothing but Python. Point it at your own disc image and you get every
-file on the disc in a form your computer can open: **models as glTF and
-ready-made `.blend` files for Blender**, textures and pictures as PNG, voices
-and music as WAV, cutscenes as MP4, and game text as UTF-8. It reads the USA
-discs (SLUS_213.89 / SLUS_214.17), **the Japanese discs (SLPS_256.40 /
-256.41)** and the May 2006 press prototype. Then it writes your changes —
-edited text, new letters, a whole new script — into copies of the discs.
+Unpack, browse, edit and translate **Xenosaga Episode III — Also sprach
+Zarathustra** (PS2) with Python. Point it at your own disc images and you get
+the game in forms your computer opens: **every model as a glTF file Blender
+opens, textured, rigged and animated with the game's own motion clips**, every
+texture as PNG in its real colours, voices and music as WAV, cutscenes as MP4,
+and all of the game's text as UTF-8. It reads the USA discs (SLUS_213.89 /
+SLUS_214.17), **the Japanese discs (SLPS_256.40 / 256.41)** and the May 2006
+press prototype. Then change it: rewrite a line, recolour a character, or
+translate into an alphabet the game never had, and the kit writes a patched
+copy of the disc and checks every byte it wrote.
 
-The kit ships no game data. **Use your own legally obtained discs only.**
+<table>
+<tr>
+<td align="center"><img src="docs/images/front/motion-kosmos-shion-walk.gif" height="260" alt="KOS-MOS and Shion walking: the kit's .glb files, animated with clip 1 of each character's field motion, rendered in Blender"></td>
+<td align="center"><img src="docs/images/xs3-ingame-hindi-movie-subtitle.png" height="260" alt="A Hindi subtitle over the opening movie, drawn by the game in PCSX2 from a font the kit rebuilt"></td>
+<td align="center"><img src="docs/images/xs3-ingame-arabic-dialogue.png" height="260" alt="Arabic in a scene dialogue box, joined and right to left, PCSX2 capture"></td>
+</tr>
+<tr>
+<td align="center"><sub>KOS-MOS and Shion, exported with their motion<br>and rendered in Blender</sub></td>
+<td align="center"><sub>Hindi subtitles over the opening movie<br>(PCSX2, a disc the kit rebuilt)</sub></td>
+<td align="center"><sub>Arabic in the dialogue box, right to left<br>(PCSX2, the same kind of disc)</sub></td>
+</tr>
+</table>
+
+**The kit ships no game data.** You need your own copy of the discs. Every
+game picture and sound on this page was made by the kit from the retail discs
+or captured from the game running in PCSX2 on a disc the kit patched; nothing
+is retouched.
+
+This is the Episode III sibling of the
+[Episode I extractor](https://github.com/LinuxJessi/Xenosaga1PythonExtractor)
+and the [Episode II extractor](https://github.com/LinuxJessi/Xenosaga2PythonExtractor),
+built the same way, with code borrowed from both where the formats are shared
+(each borrowed module says so at the top).
 
 > **Beta — feedback wanted.** Please open issues at
 > <https://github.com/LinuxJessi/Xenosaga3PythonExtractor/issues>.
-> Reading is tested on all five images. **Four kinds of disc written by the
-> kit have been booted in PCSX2 (2026-11-20) and show their edits in game:**
-> a same-size English menu edit, Arabic (new glyphs, right-to-left, scene
-> dialogue), Japanese on the USA disc with the `--unlock jp` executable patch,
-> and a text file grown past its allocation and appended (`--grow`). See
-> [docs/UPDATES.md](docs/UPDATES.md) for exactly what was booted. Everything
-> else on the write side (pictures, statfont, subtitles, Japanese discs, the
-> prototype) is still tested on disc copies only.
+> Reading is tested on all five images. Discs written by the kit have been
+> booted in PCSX2 with English edits, Arabic, Hindi, Amharic, Georgian,
+> Japanese on the USA disc, a grown file and a character recolour (Disc 1,
+> 2026-11-20/21; [docs/UPDATES.md](docs/UPDATES.md) says exactly what). Not
+> yet booted: Disc 2 and the disc swap, the Japanese discs, the prototype,
+> imported pictures and the battle HUD letters.
 
-![KOS-MOS (mdl\chr\pc\C3kosmos00.chr, USA Disc 1) rendered by Blender from the .blend the kit writes](docs/images/xs3-kosmos-blender.png)
+**Contents:** [Models](#models) · [Animation](#animation) ·
+[Translating](#translating-into-another-alphabet) ·
+[Changing textures](#changing-textures) · [Textures in their real colours](#textures-in-their-real-colours) ·
+[Audio samples](#audio-samples) · [Movies, fonts and menus](#movies-fonts-and-menus) ·
+[The window](#the-window) · [What you get](#what-you-get) · [Regions](#regions) ·
+[Commands](#commands) · [Quick start](#quick-start--gui-recommended)
 
-*KOS-MOS as `python cli.py blend` writes her: textures packed, Material
-Preview on, the armature drawn as sticks. Rendered by Blender from the
-saved file.*
+## Models
+
+Every model on every disc converts: 1,609 per disc (`.chr` characters, `.wpn`
+weapons, `.map` fields and the standalone `.pxy`), 1,589 with geometry and
+20 whose mesh slot is empty in the game's own data. Skinned models come out
+with their skeleton; maps keep their animated parts (ships, rubble,
+crystals). `blend` writes a ready `.blend`: textures packed, Material Preview
+on, the view framed. Each picture below is one command and a Blender render,
+nothing touched up ([docs/gallery/](docs/gallery/) has the scripts).
+
+### Playable characters
+
+| <img src="docs/images/gallery/kosmos00.jpg" width="140" alt="KOS-MOS"> | <img src="docs/images/gallery/shion00.jpg" width="140" alt="Shion"> | <img src="docs/images/gallery/jr00.jpg" width="140" alt="Jr."> | <img src="docs/images/gallery/momo00.jpg" width="140" alt="MOMO"> | <img src="docs/images/gallery/chaos00.jpg" width="140" alt="chaos"> |
+|:-:|:-:|:-:|:-:|:-:|
+| KOS-MOS | Shion | Jr. | MOMO | chaos |
+| <img src="docs/images/gallery/ziggy00.jpg" width="140" alt="Ziggy"> | <img src="docs/images/gallery/jin00.jpg" width="140" alt="Jin"> | <img src="docs/images/gallery/allen00.jpg" width="140" alt="Allen"> | <img src="docs/images/gallery/canan00.jpg" width="140" alt="Canaan"> | <img src="docs/images/gallery/miyuki00.jpg" width="140" alt="Miyuki"> |
+| Ziggy | Jin | Allen | Canaan | Miyuki |
+
+*Field models `mdl\chr\pc\C3<name>00.chr`, USA Disc 1.*
+
+### Notable NPCs
+
+| <img src="docs/images/gallery/virhelm00.jpg" width="140" alt="virhelm00"> | <img src="docs/images/gallery/telos00.jpg" width="140" alt="telos00"> | <img src="docs/images/gallery/mary00.jpg" width="140" alt="mary00"> | <img src="docs/images/gallery/shelley00.jpg" width="140" alt="shelley00"> | <img src="docs/images/gallery/marglis00.jpg" width="140" alt="marglis00"> |
+|:-:|:-:|:-:|:-:|:-:|
+| `virhelm00` | `telos00` | `mary00` | `shelley00` | `marglis00` |
+| <img src="docs/images/gallery/pelegri00.jpg" width="140" alt="pelegri00"> | <img src="docs/images/gallery/nephilim00.jpg" width="140" alt="nephilim00"> | <img src="docs/images/gallery/sergius00.jpg" width="140" alt="sergius00"> | <img src="docs/images/gallery/yuriev00.jpg" width="140" alt="yuriev00"> | <img src="docs/images/gallery/albelt00.jpg" width="140" alt="albelt00"> |
+| `pelegri00` | `nephilim00` | `sergius00` | `yuriev00` | `albelt00` |
+
+*`mdl\chr\npc`, captioned with the disc's own file names.*
+
+### E.S.
+
+| <img src="docs/images/gallery/M3asher01.jpg" width="180" alt="M3asher01"> | <img src="docs/images/gallery/M3zebulun01.jpg" width="180" alt="M3zebulun01"> | <img src="docs/images/gallery/M3reuben01.jpg" width="180" alt="M3reuben01"> |
+|:-:|:-:|:-:|
+| `M3asher01` | `M3zebulun01` | `M3reuben01` |
+
+### Environments
 
 | | |
 |---|---|
-| ![Arabic dialogue, wrapped and right-aligned, read back from a patched Disc 1 copy](docs/images/xs3-lang-arabic-dialogue.png) | ![Hindi (Devanagari) in the same font pair, added with --extend](docs/images/xs3-lang-hindi.png) |
-| ![Japanese on the USA disc, kana and kanji donated from the Japanese disc's font](docs/images/xs3-lang-japanese-on-usa.png) | ![Arabic with embedded Latin (HP, EP) and a button tag](docs/images/xs3-lang-arabic-help.png) |
+| <img src="docs/images/gallery/E3_CIT01.jpg" width="440" alt="E3_CIT01"><br>`E3_CIT01` | <img src="docs/images/gallery/E3_SYU01.jpg" width="440" alt="E3_SYU01"><br>`E3_SYU01` |
+| <img src="docs/images/gallery/E3_KYM02.jpg" width="440" alt="E3_KYM02"><br>`E3_KYM02` | <img src="docs/images/gallery/E3_ELS05.jpg" width="440" alt="E3_ELS05"><br>`E3_ELS05` |
+| <img src="docs/images/gallery/E3_KYO06.jpg" width="440" alt="E3_KYO06"><br>`E3_KYO06` | <img src="docs/images/gallery/E3_HOS01.jpg" width="440" alt="E3_HOS01"><br>`E3_HOS01` |
 
-*Arabic, Hindi and Japanese lines read back from patched copies of USA Disc 1
-and drawn with `lang preview` through that copy's own executable rules and
-rebuilt font. These are kit previews, not emulator captures; the PCSX2
-captures are below.*
+Maps are shown from a raised three-quarter view with their sky shells hidden
+and back faces culled, so the outer walls do not hide the rooms.
 
-**In the game (PCSX2 captures, USA Disc 1 copies written by the kit):**
+```sh
+python cli.py browse --out out/ --kinds models        # all of them, with their motion
+python cli.py model --iso "Disc 1.iso" --path 'mdl\chr\pc\C3kosmos00.chr' --out kosmos.glb
+python cli.py blend --glb kosmos.glb --render kosmos.png
+```
+
+More in [docs/MODELS.md](docs/MODELS.md) and [docs/BLENDER.md](docs/BLENDER.md).
+
+## Animation
+
+<img src="docs/images/front/motion-kosmos-battle-attack.gif" width="360" align="right" alt="KOS-MOS playing battle clip 21: a leap, a crouching slash, a lunge and the recovery">
+
+The motion files are decoded. Every body clip on every disc (5,039 per disc:
+XAC 1.4, 1.6 and 1.7, plus the FAC face clips) becomes a glTF animation on
+the model's armature, read the way the executable reads it, at 30 keys per
+second. Field clips live in `pac\cf\*.sme`, battle clips in `pac\bat\*.sme`,
+and `model` attaches a character's same-named clips by default.
+
+```sh
+python cli.py model --iso "Disc 1.iso" --path 'mdl\chr\pc\C3kosmos00.chr' \
+       --out kosmos.glb --motion 'pac\bat\C3kosmos00.sme#0,21'
+python cli.py motion --iso "Disc 1.iso" --sweep     # decode every clip on the disc
+```
+
+On the right, KOS-MOS plays battle clip 21 (`pac/bat/C3kosmos00#21`): a leap,
+a crouching slash, a lunge and the recovery. At the top of the page, KOS-MOS
+and Shion play field clip 1, a walk-like cycle that loops exactly. Below,
+KOS-MOS turns once while playing battle clip 0.
+
+<img src="docs/images/front/kosmos-turntable.gif" height="300" alt="KOS-MOS turning once while playing battle clip 0, a stance-like loop">
+
+The kit reads its own files back (every sampled joint within 2.4e-6 of the
+engine formula), the glTF validator reports no problems, and Blender imports
+every action at its clip's frame range. The game's own names for the clips
+are not on the disc, so "walk-like", "attack" and "stance" describe what the
+renders look like. None of this has been compared with the running game yet,
+and hair and coats do not swing, because the game simulates them and the kit
+does not. More in [docs/MOTION.md](docs/MOTION.md).
+
+<br clear="right">
+
+## Translating into another alphabet
+
+The kit exports every line the game shows (scenes, menus, the database,
+battle messages, movie and event subtitles) as one UTF-8 tree, and imports an
+edited tree into copies of both discs. `lang` goes further: it draws a new
+alphabet from a TrueType font into the game's free font cells, shapes and
+wraps the text (right to left where needed), and encodes it. Several scripts
+can share one disc with `--extend`. These are all **PCSX2 captures** from
+disc copies the kit wrote:
 
 | | |
 |---|---|
-| ![PCSX2 capture: Arabic dialogue in a scene's dialogue box (Blue Testament), written with lang import](docs/images/xs3-ingame-arabic-dialogue.png) | ![PCSX2 capture: Arabic "story so far" screen after loading a memory-card save](docs/images/xs3-ingame-arabic-synopsis.png) |
-| ![PCSX2 capture: Japanese on the USA disc with --unlock jp, the "story so far" screen](docs/images/xs3-ingame-japanese-unlock-synopsis.png) | ![PCSX2 capture: field menu with a Japanese first entry and help line on the USA disc](docs/images/xs3-ingame-japanese-unlock-menu.png) |
-| ![PCSX2 capture: same-size English edits in the memory-card menu](docs/images/xs3-ingame-english-memcard.png) | ![PCSX2 capture: a synopsis grown past its allocation and appended with --grow](docs/images/xs3-ingame-grown-synopsis.png) |
+| ![Hindi (Devanagari, conjuncts and vowel signs) in a scene dialogue box](docs/images/xs3-ingame-hindi-dialogue.png) | ![Arabic: the "story so far" screen, right to left](docs/images/xs3-ingame-arabic-synopsis.png) |
+| *Hindi in a scene's dialogue box* | *Arabic on the "story so far" screen* |
+| ![Amharic: the save screen's title, the overwrite prompt and Yes/No](docs/images/xs3-ingame-amharic-save.png) | ![Georgian: the "story so far" screen](docs/images/xs3-ingame-georgian-synopsis.png) |
+| *Amharic on the save screen* | *Georgian on the "story so far" screen* |
+| ![Japanese on the USA disc with --unlock jp: the field menu's first entry and help line](docs/images/xs3-ingame-japanese-unlock-menu.png) | ![A location caption in Hindi over the real-time opening](docs/images/xs3-ingame-hindi-event-subtitle.png) |
+| *Japanese on the USA disc (`--unlock jp`, kana and kanji from the Japanese font)* | *A Hindi location caption over the real-time opening* |
 
-*PCSX2 2.9.175 screenshots of copies built with `text-import`, `lang import`
-and `--grow`; the test text is deliberately obvious. Booted from a
-memory-card save (not a savestate), Disc 1 only.*
+Hindi, Amharic and Georgian were built onto one disc (three `lang scan`
+passes chained with `--extend`, 87 new glyphs) and boot together. Arabic and
+Hebrew are right to left, with the bidi algorithm checked against ICU.
+Guides: [docs/TRANSLATING.md](docs/TRANSLATING.md) ·
+[docs/SCRIPTS.md](docs/SCRIPTS.md) · [docs/FONT.md](docs/FONT.md).
 
-## Feature tour
+The Japanese release is read too: its own codec, font rules and `Message.Dat`
+layout, the 140 scenes that exist only in Japanese listed, and `align-export`
+lines the Japanese script up with the English one (TSV, JSON or a
+dual-language SRT).
 
-### The whole party, straight into Blender
+## Changing textures
 
-![Shion, MOMO, Jr., chaos, Ziggy and Jin (C3*00.chr, USA Disc 1), each rendered by Blender from the .blend `python cli.py blend` writes](docs/images/xs3-party-blender.jpg)
+<img src="docs/images/xs3-ingame-shion-recolor-zoom.jpg" width="360" align="right" alt="Shion in the Vector S-Line hall, retail (left) and with her hair recoloured by chr-iso-sweep (right), PCSX2 captures">
 
-*Shion, MOMO, Jr., chaos, Ziggy and Jin: one `blend --iso D1.iso --path
-'mdl\chr\pc\C3<name>00.chr' --render <name>.png` each, Workbench render,
-nothing touched up. Every `.chr`, `.wpn` and `.map` on all five discs
-converts the same way (1,609 models per disc).*
+`chr-decode` turns every texture in a model into PNG; `chr-palettes` and
+`chr-import-palettes` round-trip its colours through an editable swatch;
+`chr-iso-sweep` recolours every copy of a character on a disc. On the right,
+Shion in the Vector S-Line hall, retail and after
+`chr-iso-sweep --match shion --mode warm`, both PCSX2 captures from the same
+memory-card save.
 
-### Translate it — into any script
+Below, KOS-MOS from the retail disc and from a copy swept with
+`--mode blue`, rendered in Blender after re-extracting the copy. The blue
+filter changes her blue armour trim as well as her hair, so check the result
+before you sweep. Guide: [docs/MODDING-CHARACTERS.md](docs/MODDING-CHARACTERS.md).
 
-* **Export** every line the game shows (scenes, menus, encyclopedia, battle
-  messages, subtitles) as one UTF-8 tree, **edit**, and **import** it back
-  into copies of both discs. An unchanged export rebuilds byte-identical.
-* **New writing systems:** Arabic and Hebrew (right-to-left, bidi checked
-  against ICU), Devanagari and anything else HarfBuzz shapes, drawn from your
-  TrueType font into the game's free font cells.
-* **Japanese on the English game:** kana and kanji donated from the Japanese
-  disc's font, plus an executable unlock.
-* **Text inside pictures:** title cards, HUD word sheets, logos and the
-  battle HUD's bitmap letters export to PNG and go back in.
-* Guides: [TRANSLATING.md](docs/TRANSLATING.md) ·
-  [SCRIPTS.md](docs/SCRIPTS.md) · [FONT.md](docs/FONT.md)
+<br clear="right">
 
-### Japan, USA and the 2006 prototype side by side
+![KOS-MOS from the retail disc (left) and from the recoloured copy (right), rendered in Blender](docs/images/xs3-kosmos-recolor-blender.png)
 
-The kit tells the builds apart by the boot executable's hash, reads each with
-its own codec and font rules, lists the 140 scenes that exist only in the
-Japanese release, and `align-export` lines the Japanese script up against the
-English one (TSV, JSON or a dual-language SRT).
-
-### Textures in their real colours
+## Textures in their real colours
 
 ![UI sheets before and after the XTX fix: the top half is the old sepia ramp read 16 pixels off, the bottom half the corrected decode with per-picture palettes](docs/screenshots/xtx-palettes-2026-11-20.jpg)
 
@@ -104,11 +210,56 @@ sheet now draw the way the game draws them.*
 | ![Field map textures](docs/screenshots/improve-field-map.png) | ![Effect textures](docs/screenshots/improve-effects.png) |
 | *LZSS-packed field maps decoded* | *Effect-file textures* |
 
-### Write it back safely
+## Audio samples
 
-`patch` only writes **copies**: in place when a file fits, appended with
-`--grow` when it doesn't, Disc 1 and Disc 2 kept in step, every file read back
-afterwards, and mixed USA/Japan pairs refused.
+Short previews decoded by the kit (25-second BGM excerpts; voice lines cut
+from the movies' own audio at the timing in each movie's subtitle file, so
+music and effects are mixed in). Click to play or download.
+
+| | Source | Sample |
+|---|---|---|
+| Voice | movie `s030100`: "Do it anytime, KOS-MOS!" / "Acknowledged." | [voice_s030100_do_it_anytime.mp3](docs/samples/voice_s030100_do_it_anytime.mp3) |
+| Voice | movie `s031300`: "I am order!" / "Not you, KOS-MOS!" | [voice_s031300_i_am_order.mp3](docs/samples/voice_s031300_i_am_order.mp3) |
+| Voice | movie `s083110` (Disc 2): "Fear drives evolution." | [voice_s083110_fear_drives_evolution.mp3](docs/samples/voice_s083110_fear_drives_evolution.mp3) |
+| Voice | movie `s093500` (Disc 2): "When Mary fulfills her duty, Zarathustra shall speak!" | [voice_s093500_zarathustra_shall_speak.mp3](docs/samples/voice_s093500_zarathustra_shall_speak.mp3) |
+| Voice | movie `s094820` (Disc 2): "I am not Mary. I am... KOS-MOS!" | [voice_s094820_i_am_not_mary.mp3](docs/samples/voice_s094820_i_am_not_mary.mp3) |
+| BGM | `snd/adx/M01.adx` (81 s) | [bgm_m01.mp3](docs/samples/bgm_m01.mp3) |
+| BGM | `snd/adx/M11.adx` (82 s) | [bgm_m11.mp3](docs/samples/bgm_m11.mp3) |
+| BGM | `snd/adx/M56.adx` (132 s) | [bgm_m56.mp3](docs/samples/bgm_m56.mp3) |
+| BGM | `snd/adx/M78.adx` (94 s) | [bgm_m78.mp3](docs/samples/bgm_m78.mp3) |
+| BGM | `snd/adx/A01.adx` (131 s) | [bgm_a01.mp3](docs/samples/bgm_a01.mp3) |
+| BGM | `snd/adx/B01.adx` (90 s) | [bgm_b01.mp3](docs/samples/bgm_b01.mp3) |
+| Battle callout | `snd/adx/bat_voice/allen_bst1.adx` | [voice_bat_voice_allen_bst1.mp3](docs/samples/voice_bat_voice_allen_bst1.mp3) |
+| Event voice | `snd/adx/mev/bat_eld33.adx` | [voice_mev_bat_eld33.mp3](docs/samples/voice_mev_bat_eld33.mp3) |
+| System jingle | `snd/adx/sys/system01.adx` | [voice_sys_system01.mp3](docs/samples/voice_sys_system01.mp3) |
+| Field SE | `snd/dat/CIT.dap` cue 3 | [sfx_CIT_c03.mp3](docs/samples/sfx_CIT_c03.mp3) |
+| Battle SE | bank inside `pac/cf/C3kosmos00.sme`, cue 0 | [sfx_kosmos_bank_c00.mp3](docs/samples/sfx_kosmos_bank_c00.mp3) |
+
+The full set (10 BGM streams, 289 battle callouts, 77 movie voice lines,
+607 sound banks, every movie's audio) comes out of
+`browse --kinds audio,soundbanks,movies` on your own disc.
+
+## Movies, fonts and menus
+
+| | |
+|---|---|
+| <img src="docs/images/tour/movie_s000300.jpg" width="400" alt="A frame of the opening movie s000300: young Shion in a cockpit"> | <img src="docs/images/xs3-ingame-field-retail.png" width="400" alt="Vector S-Line Division gate hall, retail, PCSX2 capture"> |
+| A frame of `s000300.sfd`, the opening (`browse --kinds movies`) | The Vector S-Line hall in the retail game (PCSX2), for comparison |
+| <img src="docs/images/tour/ui_sheets.jpg" width="400" alt="A menu background, item icons and the controller sheet"> | <img src="docs/images/tour/ui_portraits.jpg" width="400" alt="Party portraits from the battle window sheet window0.xtx"> |
+| UI sheets: a menu background (`mnu\pse\haikei`), item icons (`itemcap.xtx`), the controller (`ctrl.xtx`) | Party portraits from the window sheet `mnu\us\window0.xtx` |
+| <img src="docs/images/tour/font_sheet.png" width="300" alt="font0 glyph sheet 0"> | <img src="docs/images/tour/synopsis_pictures.jpg" width="400" alt="Four of the pictures behind the story-so-far screen"> |
+| Sheet 0 of `font0` (`font-extract`) | Four of the 71 pictures behind the "story so far" screen (`mnu\syno\*.jpg`) |
+| <img src="docs/images/tour/textures_kosmos.png" width="400" alt="KOS-MOS's texture pages from C3kosmos00.chr"> | <img src="docs/screenshots/extracted-mosaic.png" width="400" alt="Extracted memory-card save illustrations"> |
+| KOS-MOS's texture pages (`chr-decode`) | Some of the 348 memory-card save scenes (`--kinds images`) |
+
+## The window
+
+![The kit's window: a card per command, grouped by section, the environment panel on the right](docs/images/tour/gui-window.png)
+
+`python gui.py` (or a launcher) opens a local page with one card per
+command, grouped by section, built from the command line's own parser. It
+finds your discs and tells USA, Japan and prototype images apart. The discs
+in this screenshot are empty stand-ins with the usual file names.
 
 ## What you get
 
@@ -165,9 +316,9 @@ or a launcher) has a card for every command, grouped by section.
 `XS3_D2`, `XS3_PROTO`, `XS3_JP1` and `XS3_JP2` to your ISO paths to include
 the disc checks.
 
-## What's new — 2026-11-20
+## What's new — 2026-11-20/21
 
-Two passes brought the kit level with the Xenosaga I and II kits. Full
+Seven passes brought the kit level with the Xenosaga I and II kits. Full
 change log: [docs/UPDATES.md](docs/UPDATES.md); every document:
 [docs/README.md](docs/README.md).
 
@@ -196,14 +347,22 @@ change log: [docs/UPDATES.md](docs/UPDATES.md); every document:
   `chr-iso-*` now find files through the disc's own index on any build.
 * **A new GUI**, built from the command line itself, grouped by section, that
   finds your discs and tells USA, Japan and prototype images apart.
+* **Motion.** All 5,039 clips per disc decode (`xap.py`, ported from the
+  Episode II kit with XS3's new clip versions) and attach to the models.
+* **Every model converts.** Maps carry a second model at header +0xD0 (their
+  animated parts); the three "unexplained" maps were that case.
+* **Palettes from the game code.** The executable's sprite tables and draw
+  calls bind the UI sheets' palettes (`engine_palettes.py`).
+* **Booted in PCSX2.** English, Arabic, Hindi, Amharic, Georgian, Japanese on
+  the USA disc, a grown file and a recolour, all on Disc 1 copies.
 
-Still open: only four USA Disc 1 builds have been booted in PCSX2 (see
-UPDATES.md), nothing on Disc 2, the Japanese discs or the prototype; the loader
-buffer sizes for text objects are unknown (so growth needs `--grow`); the
-`batdat.bin` string fields are structural, not traced in code; `.xap`
-animation and the `.xep` codec are not decoded; about a fifth of the art on
-the window0-2 sheets (parts no draw found in the game code reaches) still has
-a ranked, not engine-bound, palette.
+Still open: nothing booted from Disc 2, the Japanese discs or the prototype;
+no battle screen captured yet; the loader buffer sizes for text objects are
+unknown (so growth needs `--grow`); the `batdat.bin` string fields are
+structural, not traced in code; motion is not yet compared with the running
+game and the map `PAM ` block is undecoded; the `.xep` codec is not decoded;
+about a fifth of the art on the window0-2 sheets still has a ranked, not
+engine-bound, palette.
 
 ### Earlier: the 2026-09-24 improvement run
 
@@ -212,9 +371,7 @@ files), the LZSS field maps (`xcpack.py`), 4-bit textures, the text kind and
 the `.sme` sound banks. Details and before/after panels in
 [docs/UPDATES.md](docs/UPDATES.md).
 
-![Extracted save illustrations](docs/screenshots/extracted-mosaic.png)
-
-*1,300+ event illustrations, 348 memory-card save scenes (above), every
+*1,300+ event illustrations, 348 memory-card save scenes, every
 character face texture, every cutscene as MP4, every voiced line as WAV.
 Real extraction; nothing reconstructed or upscaled.*
 
@@ -223,9 +380,7 @@ Real extraction; nothing reconstructed or upscaled.*
 > what it actually is, where the engine reads it from, plus a "Fun finds"
 > section at the bottom.
 
-## Samples
-
-### Dialogue
+## Dialogue sample
 
 From `cf/us/2940.sb`, a Miltia field scene, exactly as the `text` kind
 writes it (`<lN>` = portrait/line slot, `<wNN>` = wait in frames):
@@ -250,27 +405,6 @@ An elderly resident of\nthe Dabrye Mine.
 An elderly resident of the <Dabrye Mine> on Miltia. Originally\na labor
 immigrant from another star system after Miltia\nbecame a republic …
 ```
-
-### Audio
-
-Short previews decoded by the kit from Disc 1 (25-second BGM excerpts,
-full-length voice/SE cues). Click to play or download.
-
-| | Source | Sample |
-|---|---|---|
-| BGM | `snd/adx/M01.adx` (81 s) | [bgm_m01.mp3](docs/samples/bgm_m01.mp3) |
-| BGM | `snd/adx/M11.adx` (82 s) | [bgm_m11.mp3](docs/samples/bgm_m11.mp3) |
-| BGM | `snd/adx/M56.adx` (132 s) | [bgm_m56.mp3](docs/samples/bgm_m56.mp3) |
-| BGM | `snd/adx/M78.adx` (94 s) | [bgm_m78.mp3](docs/samples/bgm_m78.mp3) |
-| Battle callout | `snd/adx/bat_voice/allen_bst1.adx` | [voice_bat_voice_allen_bst1.mp3](docs/samples/voice_bat_voice_allen_bst1.mp3) |
-| Event voice | `snd/adx/mev/bat_eld33.adx` | [voice_mev_bat_eld33.mp3](docs/samples/voice_mev_bat_eld33.mp3) |
-| System jingle | `snd/adx/sys/system01.adx` | [voice_sys_system01.mp3](docs/samples/voice_sys_system01.mp3) |
-| Field SE | `snd/dat/CIT.dap` cue 3 | [sfx_CIT_c03.mp3](docs/samples/sfx_CIT_c03.mp3) |
-| Battle SE | bank inside `pac/cf/C3kosmos00.sme`, cue 0 | [sfx_kosmos_bank_c00.mp3](docs/samples/sfx_kosmos_bank_c00.mp3) |
-
-The full set (10 BGM streams, 289 battle callouts, 77 movie voice lines,
-607 sound banks) comes out of `browse --kinds audio,soundbanks` on your
-own disc.
 
 ## Quick start — GUI (recommended)
 

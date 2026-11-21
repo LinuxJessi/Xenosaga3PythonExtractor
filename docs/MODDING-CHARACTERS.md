@@ -87,9 +87,12 @@ PNGs to find what you want to change and note its name.
 `iso-sweep` applies them disc-wide. Two selection strategies, worth
 knowing if you write your own:
 
-- **Color-band filter** (KOS-MOS): her hair is the only blue thing, so a
-  "is this blue?" test over every palette entry is safe. One-liner rules,
-  no name knowledge needed.
+- **Color-band filter** (KOS-MOS): an "is this blue?" test over every
+  palette entry. One-liner rules, no name knowledge needed. Her hair is not
+  the only blue thing on the field model `C3kosmos00.chr`, though: the blue
+  armour trim changes too (seen in a Blender render of a swept copy,
+  2026-11-21, `docs/images/xs3-kosmos-recolor-blender.png`). Check a
+  render before you sweep, or use a tile policy instead.
 - **Tile policy by name** (Shion): chestnut hair lives in the same warm
   range as skin, so color rules alone would bleed. Instead: palettes used
   *only* by hair textures get recolored wholesale; palettes shared with a
