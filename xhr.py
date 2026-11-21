@@ -19,6 +19,9 @@ on every skeleton of the USA discs and the May 2006 prototype, and by
 the bind pose: joint matrix j of the `.pxy` binds to transform j + 2 and
 the rest pose reproduces the mesh (docs/MODELS.md).  Also: `self_test()`
 returns 0 and `add_commands()` exists (library: no subcommand).
+2026-11-21: `parse` also keeps header word +0x5C (`word5c`) and each
+run-D record's vector at +0x3C (`d_slot`), which xap.py's parent-scale
+lookup needs.
 
 The rest of this docstring is the Episode II description.
 
@@ -233,6 +236,13 @@ def parse(buf):
         raise XhrError("run F runs past the file")
     x = Xhr(version, dict(A=na, B=nb, C=nc, D=nd, E=ne, F=nf), joints, size)
     x.e_end = e_end
+    # for xap.py (parent-scale lookup FUN_00299d10, Episode III): header
+    # word +0x5C, the rest S of transform 1 (record +0x28 when the header
+    # bit 3 is clear) and the run-D slot vectors (record +0x3C)
+    x.word5c = struct.unpack_from("<I", buf, 0x5C)[0] if len(buf) >= 0x60 \
+        else 0
+    x.d_slot = {j.index: f3(j.offset + 0x3C) for j in joints
+                if j.kind == "D"}
     return x
 
 

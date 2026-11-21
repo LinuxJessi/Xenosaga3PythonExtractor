@@ -23,6 +23,7 @@ They read the USA discs, the May 2006 prototype and the Japan discs:
     patch                       write files into COPIES of one disc or a pair (patch.py)
     repack-* / chr-iso-*        older single-ISO, in-place writers (repack.py, chrtex.py)
     model / models / glb-info / blend   models to glTF and .blend (models_sweep.py, gltf.py, blend.py)
+    motion                      .xap/.fap clips: table, pose, disc sweep; `model --motion` (xap.py)
     text-export / text-import / text-roundtrip / align-export
                                 game text out and back in, JP<->EN alignment
                                 (textpack.py, align.py)
@@ -407,7 +408,7 @@ COMMAND_MODULES = (
     "textpack", "align", "langpack",
     "font", "glyphs", "statfont",
     "xtx_encode", "imagetext", "chrtex",
-    "vif", "gltf", "xhr", "pxy", "models_sweep", "blend",
+    "vif", "gltf", "xhr", "xap", "pxy", "models_sweep", "blend",
     "gui",
 )
 
@@ -423,7 +424,7 @@ SELF_TESTS = (
     "textpack", "align", "langpack",
     "font", "glyphs", "statfont",
     "xtx_decode", "xtx_encode", "imagetext", "chrtex",
-    "vif", "gltf", "xhr", "pxy", "models_sweep", "blend",
+    "vif", "gltf", "xhr", "xap", "pxy", "models_sweep", "blend",
     "browse_bundle", "gui",
 )
 

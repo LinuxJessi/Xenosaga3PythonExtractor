@@ -299,8 +299,9 @@ Software renders of KOS-MOS, Allen and `E3_ELS01` looked right.
 
 ## Open
 
-* Motion (`.xap` in `.wpn` packages and elsewhere), the `epf` slot, the
-  `.xhr` tables after run F.
+* The `epf` slot, the `.xhr` tables after run F. (Motion, the `.xap`
+  clips in `.sme` and `.wpn` packages, is decoded since 2026-11-21:
+  [MOTION.md](MOTION.md).)
 * What the position scale of layout Q is applied by (VU code), and why
   some models are quantized.
 * Strip winding of layout U against a culling renderer; the face-normal

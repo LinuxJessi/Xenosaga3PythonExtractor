@@ -7,6 +7,11 @@ takes `unlit=True`, which writes the KHR_materials_unlit extension (and
 lists it in `extensionsUsed`) for the field-map meshes, whose batches
 carry baked vertex colours and no vertex normals; `self_test()` returns 0;
 `add_commands()` registers `glb-info`.  Everything else is the XS2 code.
+2026-11-21: the XS2 animation half (`pack_glb`, `extend_skin`,
+`append_animations`, `sample_animation`, `validate`, and the `overrides`
+argument of `node_world_matrices` / `skinned_positions`) taken over
+unchanged from the same XS2 module, with its self-test checks, for
+xap.py (Episode III motion).
 
 Lineage: the buffer-view/accessor bookkeeping, the GLB container packing
 and the matrix helpers (`matmul`, `invert_rigid`, `quat_from_matrix`) are
@@ -36,7 +41,9 @@ import numpy as np
 
 __all__ = ["GlbBuilder", "read_glb", "accessor_array", "matmul",
            "invert_rigid", "quat_from_matrix", "trs_from_matrix",
-           "skinned_positions", "self_test"]
+           "skinned_positions", "node_world_matrices", "pack_glb",
+           "extend_skin", "append_animations", "sample_animation",
+           "validate", "self_test"]
 
 FLOAT, USHORT, UINT, UBYTE = 5126, 5123, 5125, 5121
 ARRAY_BUFFER, ELEMENT_ARRAY_BUFFER = 34962, 34963
@@ -357,11 +364,18 @@ def accessor_array(js, binc, index):
     return arr.reshape(-1, n) if n > 1 else arr
 
 
-def node_world_matrices(js):
-    """Column-vector world matrix of every node."""
+def node_world_matrices(js, overrides=None):
+    """Column-vector world matrix of every node.  `overrides`: {node:
+    {"translation"|"rotation"|"scale": value}} as `sample_animation`
+    returns, replacing those parts of the node's local TRS."""
     nodes = js["nodes"]
     local = []
-    for nd in nodes:
+    overrides = overrides or {}
+    for i, nd in enumerate(nodes):
+        ov = overrides.get(i)
+        if ov:
+            nd = dict(nd, **ov)
+            nd.pop("matrix", None)
         if "matrix" in nd:
             m = np.array(nd["matrix"], dtype=np.float64).reshape(4, 4).T
         else:
@@ -385,14 +399,14 @@ def node_world_matrices(js):
     return world
 
 
-def skinned_positions(js, binc, node_index):
-    """Positions of a skinned mesh node evaluated the glTF way in the
-    file's rest pose: sum_i w_i * jointWorld_i * inverseBind_i * p.
-    Returns a list of (static positions, skinned positions), one pair per
-    primitive."""
+def skinned_positions(js, binc, node_index, overrides=None):
+    """Positions of a skinned mesh node evaluated the glTF way:
+    sum_i w_i * jointWorld_i * inverseBind_i * p, in the file's rest pose
+    or with node `overrides` (an animation sample).  Returns a list of
+    (static positions, skinned positions), one pair per primitive."""
     nd = js["nodes"][node_index]
     skin = js["skins"][nd["skin"]]
-    world = node_world_matrices(js)
+    world = node_world_matrices(js, overrides)
     ibm = accessor_array(js, binc, skin["inverseBindMatrices"])
     ibm = ibm.reshape(-1, 4, 4).transpose(0, 2, 1).astype(np.float64)
     jm = np.stack([world[j] @ ibm[k] for k, j in enumerate(skin["joints"])])
@@ -408,6 +422,256 @@ def skinned_positions(js, binc, node_index):
             acc += wt[:, k:k + 1] * np.einsum("nij,nj->ni", jm[j[:, k]], ph)
         out.append((p, acc[:, :3]))
     return out
+
+
+# -------------------------------------------------------------- animation
+
+def pack_glb(js, binc):
+    """Serialise a glTF dict and its binary chunk as a .glb."""
+    binc = bytearray(binc)
+    while len(binc) % 4:
+        binc.append(0)
+    js["buffers"] = [dict(js.get("buffers", [{}])[0], byteLength=len(binc))]
+    blob = json.dumps(js, separators=(",", ":")).encode()
+    while len(blob) % 4:
+        blob += b" "
+    total = 12 + 8 + len(blob) + 8 + len(binc)
+    return (struct.pack("<4sII", b"glTF", 2, total)
+            + struct.pack("<I4s", len(blob), b"JSON") + blob
+            + struct.pack("<I4s", len(binc), b"BIN\0") + bytes(binc))
+
+
+_PATH_TYPE = {"translation": "VEC3", "rotation": "VEC4", "scale": "VEC3"}
+
+
+def extend_skin(glb_bytes, skin_index, nodes):
+    """Add `nodes` to a skin's joint list (after the existing joints, so
+    vertex joint indices keep their meaning), each with the inverse of its
+    rest world matrix as inverse bind matrix.  No vertex refers to them;
+    importers such as Blender then make a bone of every one.  The rewritten
+    list has every matrix's last row exactly (0, 0, 0, 1), as glTF asks
+    (an inverse computed in floating point can leave 1e-17 there)."""
+    js, binc = read_glb(glb_bytes)
+    skin = js["skins"][skin_index]
+    nodes = [n for n in nodes if n not in skin["joints"]]
+    if not nodes:
+        return glb_bytes
+    world = node_world_matrices(js)
+    old = accessor_array(js, binc, skin["inverseBindMatrices"]).reshape(
+        -1, 4, 4).astype(np.float64)                 # column-major storage
+    new = np.stack([np.linalg.inv(world[n]) for n in nodes])
+    new[:, 3, :] = (0.0, 0.0, 0.0, 1.0)     # exactly affine (glTF requires it)
+    new = new.transpose(0, 2, 1)
+    ibm = np.concatenate([old, new])
+    ibm[:, :3, 3] = 0.0                      # stored transposed: the last
+    ibm[:, 3, 3] = 1.0                       # row of every matrix, exactly
+    ibm = ibm.astype("<f4")
+    binc = bytearray(binc)
+    while len(binc) % 4:
+        binc.append(0)
+    # the skin's accessor and its buffer view now cover the longer list,
+    # appended to the buffer (the old bytes stay, unreferenced)
+    acc = js["accessors"][skin["inverseBindMatrices"]]
+    view = {"buffer": 0, "byteOffset": len(binc), "byteLength": ibm.nbytes}
+    shared = sum(a.get("bufferView") == acc["bufferView"]
+                 for a in js["accessors"]) > 1
+    if shared:
+        js["bufferViews"].append(view)
+        acc["bufferView"] = len(js["bufferViews"]) - 1
+    else:
+        js["bufferViews"][acc["bufferView"]] = view
+    binc.extend(ibm.tobytes())
+    acc.pop("byteOffset", None)
+    acc["count"] = len(ibm)
+    skin["joints"] = list(skin["joints"]) + list(nodes)
+    return pack_glb(js, binc)
+
+
+def append_animations(glb_bytes, animations):
+    """Append animations to a .glb and return the new bytes.
+
+    animations: [{"name", "channels": [(node, path, times (k,), values
+    (k,c), interpolation)], "extras"}].  Each array gets its own buffer
+    view at the end of the BIN chunk; inputs carry min/max."""
+    js, binc = read_glb(glb_bytes)
+    binc = bytearray(binc)
+    views = js.setdefault("bufferViews", [])
+    accs = js.setdefault("accessors", [])
+
+    def add(arr, atype, minmax):
+        a = np.ascontiguousarray(arr, dtype="<f4")
+        while len(binc) % 4:
+            binc.append(0)
+        views.append({"buffer": 0, "byteOffset": len(binc),
+                      "byteLength": a.nbytes})
+        binc.extend(a.tobytes())
+        acc = {"bufferView": len(views) - 1, "componentType": FLOAT,
+               "count": int(a.shape[0]), "type": atype}
+        if minmax:
+            acc["min"] = [float(a.min())]
+            acc["max"] = [float(a.max())]
+        accs.append(acc)
+        return len(accs) - 1
+
+    out = js.setdefault("animations", [])
+    for an in animations:
+        samplers, channels = [], []
+        for node, path, times, values, interp in an["channels"]:
+            atype = _PATH_TYPE[path]
+            t = np.asarray(times, dtype=np.float64).reshape(-1)
+            v = np.asarray(values, dtype=np.float64).reshape(
+                len(t), _NCOMP[atype])
+            samplers.append({"input": add(t, "SCALAR", True),
+                             "output": add(v, atype, False),
+                             "interpolation": interp})
+            channels.append({"sampler": len(samplers) - 1,
+                             "target": {"node": int(node), "path": path}})
+        a = {"name": an["name"], "samplers": samplers, "channels": channels}
+        if an.get("extras"):
+            a["extras"] = an["extras"]
+        out.append(a)
+    return pack_glb(js, binc)
+
+
+def _slerp(q0, q1, u):
+    q0 = np.asarray(q0, dtype=np.float64)
+    q1 = np.asarray(q1, dtype=np.float64)
+    d = float(np.dot(q0, q1))
+    if d < 0:
+        q1, d = -q1, -d
+    if d > 0.9995:
+        q = q0 + u * (q1 - q0)
+    else:
+        th = math.acos(d)
+        q = (math.sin((1 - u) * th) * q0 + math.sin(u * th) * q1) / \
+            math.sin(th)
+    return q / np.linalg.norm(q)
+
+
+def sample_animation(js, binc, anim_index, t):
+    """Local TRS overrides {node: {path: value}} of one animation at time
+    t (seconds): linear for translation / scale, slerp for rotation,
+    clamped at both ends (glTF LINEAR semantics)."""
+    an = js["animations"][anim_index]
+    out = {}
+    for ch in an["channels"]:
+        smp = an["samplers"][ch["sampler"]]
+        tm = accessor_array(js, binc, smp["input"]).astype(np.float64)
+        v = accessor_array(js, binc, smp["output"]).astype(np.float64)
+        v = v.reshape(len(tm), -1)
+        path = ch["target"]["path"]
+        if t <= tm[0]:
+            val = v[0]
+        elif t >= tm[-1]:
+            val = v[-1]
+        else:
+            k = int(np.searchsorted(tm, t, side="right")) - 1
+            u = (t - tm[k]) / (tm[k + 1] - tm[k])
+            if path == "rotation":
+                val = _slerp(v[k], v[k + 1], u)
+            else:
+                val = v[k] + u * (v[k + 1] - v[k])
+        out.setdefault(ch["target"]["node"], {})[path] = \
+            [float(c) for c in val]
+    return out
+
+
+_CSIZE = {FLOAT: 4, USHORT: 2, UINT: 4, UBYTE: 1}
+
+
+def validate(js, binc):
+    """Structural problems of a glTF (buffers, accessors, animations), as
+    a list of strings; [] when none are found."""
+    probs = []
+    views = js.get("bufferViews", [])
+    accs = js.get("accessors", [])
+    for i, v in enumerate(views):
+        off, ln = v.get("byteOffset", 0), v.get("byteLength", 0)
+        if off % 4:
+            probs.append("bufferView %d offset %d not 4-aligned" % (i, off))
+        if off + ln > len(binc):
+            probs.append("bufferView %d runs past the buffer" % i)
+    for i, a in enumerate(accs):
+        if a.get("bufferView") is None or a["bufferView"] >= len(views):
+            probs.append("accessor %d: no buffer view" % i)
+            continue
+        v = views[a["bufferView"]]
+        if a.get("componentType") not in _CSIZE or a.get("type") not in _NCOMP:
+            probs.append("accessor %d: unknown type" % i)
+            continue
+        es = _CSIZE[a["componentType"]] * _NCOMP[a["type"]]
+        stride = v.get("byteStride", es)
+        aoff = a.get("byteOffset", 0)
+        need = aoff + (stride * (a["count"] - 1) + es if a["count"] else 0)
+        if aoff % _CSIZE[a["componentType"]]:
+            probs.append("accessor %d offset misaligned" % i)
+        if need > v.get("byteLength", 0):
+            probs.append("accessor %d runs past its buffer view" % i)
+    nn = len(js.get("nodes", []))
+    for ai, an in enumerate(js.get("animations", [])):
+        smps = an.get("samplers", [])
+        seen = set()
+        for ch in an.get("channels", []):
+            tg = ch.get("target", {})
+            node, path = tg.get("node"), tg.get("path")
+            where = "animation %d (%s)" % (ai, an.get("name", ""))
+            if node is None or not 0 <= node < nn:
+                probs.append("%s: channel targets missing node %r"
+                             % (where, node))
+            if path not in _PATH_TYPE:
+                probs.append("%s: path %r" % (where, path))
+                continue
+            if (node, path) in seen:
+                probs.append("%s: two channels for node %r %s"
+                             % (where, node, path))
+            seen.add((node, path))
+            if not 0 <= ch.get("sampler", -1) < len(smps):
+                probs.append("%s: channel without sampler" % where)
+                continue
+            smp = smps[ch["sampler"]]
+            try:
+                ia, oa = accs[smp["input"]], accs[smp["output"]]
+            except (KeyError, IndexError):
+                probs.append("%s: sampler accessors missing" % where)
+                continue
+            if ia["componentType"] != FLOAT or ia["type"] != "SCALAR":
+                probs.append("%s: input not a float scalar" % where)
+                continue
+            if "min" not in ia or "max" not in ia:
+                probs.append("%s: input without min/max" % where)
+            if smp.get("interpolation", "LINEAR") not in ("LINEAR", "STEP",
+                                                          "CUBICSPLINE"):
+                probs.append("%s: interpolation %r" % (where,
+                                                       smp["interpolation"]))
+            if oa["count"] != ia["count"]:
+                probs.append("%s: %d outputs for %d inputs"
+                             % (where, oa["count"], ia["count"]))
+            if oa["componentType"] != FLOAT or oa["type"] != _PATH_TYPE[path]:
+                probs.append("%s: %s output is %s" % (where, path, oa["type"]))
+                continue
+            try:
+                tm = accessor_array(js, binc, smp["input"])
+                val = accessor_array(js, binc, smp["output"])
+            except ValueError:
+                probs.append("%s: accessor data unreadable" % where)
+                continue
+            if not np.all(np.isfinite(tm)) or not np.all(np.isfinite(val)):
+                probs.append("%s: NaN or Inf in %s" % (where, path))
+                continue
+            if len(tm) > 1 and not np.all(np.diff(tm) > 0):
+                probs.append("%s: %s times not strictly increasing"
+                             % (where, path))
+            if "min" in ia and len(tm) and (
+                    abs(ia["min"][0] - float(tm.min())) > 0 or
+                    abs(ia["max"][0] - float(tm.max())) > 0):
+                probs.append("%s: input min/max do not match the data" % where)
+            if path == "rotation" and len(val):
+                dev = float(np.abs(np.linalg.norm(val.astype(np.float64),
+                                                  axis=1) - 1).max())
+                if dev >= 1e-5:
+                    probs.append("%s: rotation not unit (|q| off by %.3g)"
+                                 % (where, dev))
+    return probs
 
 
 # --------------------------------------------------------------- self-test
@@ -473,6 +737,68 @@ def self_test():
         pass
     else:
         raise AssertionError("accepted an out-of-range index")
+    # animation: append, read back, validate, sample
+    times = np.array([0.0, 0.5, 1.0])
+    qa = np.array(quat_from_matrix(np.eye(3).tolist()))
+    qb = np.array(quat_from_matrix(j1[:3, :3].tolist()))
+    qc = np.array([0.0, 0.0, 0.0, 1.0])
+    rots = np.stack([qa, qb, qc])
+    trans = np.array([[0, 1, 0], [0, 2, 0], [0, 1, 0.0]])
+    blob2 = append_animations(blob, [{
+        "name": "a", "extras": {"k": 1},
+        "channels": [(n1, "rotation", times, rots, "LINEAR"),
+                     (n1, "translation", times, trans, "LINEAR"),
+                     (n0, "scale", times[:1], [[1.0, 1.0, 1.0]], "LINEAR")]}])
+    js2, binc2 = read_glb(blob2)
+    assert validate(js2, binc2) == [], validate(js2, binc2)
+    assert validate(js, binc) == []
+    assert js2["meshes"] == js["meshes"] and js2["animations"][0]["extras"] \
+        == {"k": 1}
+    assert np.array_equal(accessor_array(js2, binc2, prim["indices"]),
+                          accessor_array(js, binc, prim["indices"]))
+    ov = sample_animation(js2, binc2, 0, 0.25)
+    # hand slerp halfway between identity and a 90-degree z turn: 45 deg
+    want = [0.0, 0.0, math.sin(math.pi / 8), math.cos(math.pi / 8)]
+    assert np.abs(np.array(ov[n1]["rotation"]) - want).max() < 1e-6, ov
+    assert np.allclose(ov[n1]["translation"], [0, 1.5, 0])
+    assert ov[n0]["scale"] == [1.0, 1.0, 1.0]
+    assert np.allclose(sample_animation(js2, binc2, 0, 9.0)[n1]["translation"],
+                       [0, 1, 0])
+    w = node_world_matrices(js2, ov)
+    assert np.abs(w[n1][:3, :3] - _quat_matrix(want)).max() < 1e-6
+    sk = skinned_positions(js2, binc2, mn, ov)[0][1]
+    want3 = (w[n1] @ np.linalg.inv(j1) @ [0, 2, 0, 1.0])[:3]  # vertex 3 on j1
+    assert np.abs(sk[3] - want3).max() < 1e-6
+    # a node added to the skin keeps every vertex where it was
+    n_extra = len(js2["nodes"])
+    js3 = json.loads(json.dumps(js2))
+    js3["nodes"].append({"name": "extra", "translation": [0, 0, 3.0]})
+    js3["nodes"][n1].setdefault("children", []).append(n_extra)
+    blob3 = extend_skin(pack_glb(js3, binc2), 0, [n_extra, n1])
+    js3, binc3 = read_glb(blob3)
+    assert js3["skins"][0]["joints"] == [n0, n1, n_extra]
+    assert validate(js3, binc3) == []
+    p3 = skinned_positions(js3, binc3, mn)[0]
+    assert np.abs(p3[0] - p3[1]).max() < 1e-6
+    ib = accessor_array(js3, binc3, js3["skins"][0]["inverseBindMatrices"])
+    w3 = node_world_matrices(js3)
+    assert np.abs(ib.reshape(-1, 4, 4)[2].T @ w3[n_extra] - np.eye(4)).max() \
+        < 1e-6
+    assert np.all(ib.reshape(-1, 4, 4)[2][:, 3] == (0, 0, 0, 1))
+    # damage is reported
+    bad = json.loads(json.dumps(js2))
+    smp = bad["animations"][0]["samplers"][0]
+    bb = bytearray(binc2)
+    ti = bad["bufferViews"][bad["accessors"][smp["input"]]["bufferView"]]
+    struct.pack_into("<f", bb, ti["byteOffset"] + 4, 2.0)      # 0, 2, 1
+    qv = bad["bufferViews"][bad["accessors"][smp["output"]]["bufferView"]]
+    struct.pack_into("<4f", bb, qv["byteOffset"], 0.0, 0.0, 0.0, 2.0)
+    bad["animations"][0]["channels"].append(
+        dict(bad["animations"][0]["channels"][1]))
+    pr = validate(bad, bytes(bb))
+    assert any("not strictly increasing" in p for p in pr), pr
+    assert any("not unit" in p for p in pr), pr
+    assert any("two channels" in p for p in pr), pr
     b2 = GlbBuilder("gltf.py self-test (unlit)")
     um = b2.add_material("u", unlit=True)
     b2.add_node("m", mesh=b2.add_mesh("t", [dict(positions=pos[:3],
@@ -484,7 +810,7 @@ def self_test():
     assert "NORMAL" not in js2["meshes"][0]["primitives"][0]["attributes"]
     assert "extensionsUsed" not in js
     print("gltf self-test ok (writer, reader, skinning, quaternions, "
-          "index check, exact IBM bottom row, unlit extension)")
+          "index check, exact IBM bottom row, unlit extension, animations)")
     return 0
 
 
