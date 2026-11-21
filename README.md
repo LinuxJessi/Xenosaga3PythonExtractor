@@ -93,6 +93,12 @@ English one (TSV, JSON or a dual-language SRT).
 *Top: what every earlier version produced. Bottom: pixels read from the
 right offset and each icon, thumbnail and portrait given its own palette.*
 
+![Window sheets, titleobj and the minigame sheet before and after binding palettes from the game's own draw code](docs/screenshots/ui-palettes-engine-2026-11-20.jpg)
+
+*Then the game's own sprite tables and draw calls (SLUS, OV01, OV04) pick
+each sprite's palette: HUD words, gauges, the title menu and the minigame
+sheet now draw the way the game draws them.*
+
 | | |
 |---|---|
 | ![Field map textures](docs/screenshots/improve-field-map.png) | ![Effect textures](docs/screenshots/improve-effects.png) |
