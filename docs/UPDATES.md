@@ -46,6 +46,69 @@ under a node named after the inner pxy (rest pose; `PAM` is not decoded).
 **To benefit:** re-run `models` (or `model` for one map). Maps with
 animated parts now include them.
 
+## 2026-11-20 (sixth pass) — UI-sheet palettes from the game code: titleobj, minigame, window sheets
+
+![UI sheets before/after the engine palette bindings](screenshots/ui-palettes-engine-2026-11-20.jpg)
+
+**The decoder now uses the CLUT the game itself binds** (`engine_palettes.py`,
+used by `xtx_decode.plan_palettes`). The XTX file does not say which parked
+palette colours which pixel; the draw code does. Every sheet is uploaded by
+FUN_001997d0 to VRAM page DAT_004c83a2 (the XTX header is the upload
+descriptor; the "format" field at +0x12 is the buffer width, 8), and every
+draw loads its CLUT from that page plus a block offset K, i.e. from a 16x16
+tile of the sheet's own canvas (`xtx_encode.cbp_xy(K)`). Found so far:
+
+- **SLUS_213.89 sprite tables** (u, v, w, h, CBP; read by FUN_002cfff0 /
+  FUN_002d0828 through PTR_DAT_004039f8): VA 0x402c38 (window sheets, 140
+  entries: portraits, icons, HUD words, gauges), 0x403728 (itemcap) and
+  0x403890 (segcap). JP SLPS_256.40 has the same window table without the
+  26 lowercase-letter entries (VA 0x4016b8); the prototype differs by one
+  pixel in one entry.
+- **26 window-sheet draw functions** with the CBP and the clamp rectangle as
+  immediates (FUN_0023c2c0 letters, FUN_0023c6f8 digits, FUN_0023cfc8 gauge,
+  FUN_0023bf30 tabs, FUN_0023eba8 menu icons, FUN_0026fad0 frame, ...; listed
+  in `WINDOW_CODE`).
+- **OV01.OVL FUN_00a810a0** (title menu): titleobj is drawn with CBP
+  0x308 / 0x30c / 0x318 — tiles (0,112), (16,112), (32,112) of titleobj
+  itself. **titleobj does have palettes**: one colour each (grey 42/42/42 for
+  the words, cyan 137/254/224 for the selected-item glow, white for the
+  other bars) with an alpha ramp. The CLUT detector wants >= 26 fully opaque
+  entries, so it never saw them, and the third-pass note "no palette in the
+  file" was wrong.
+- **OV04.OVL sprite table** (minigame, VA 0xaa54b8 US / 0xaa5098 JP, 79
+  entries; US and JP lay the sheet out differently).
+
+`xtx_decode.self_test` re-reads every table from the discs (USA Disc 1 and
+Japan Disc 1) and checks that each bound rectangle is drawn with its CLUT.
+
+| Sheet | Before | Now |
+| --- | --- | --- |
+| itemcap, segcap | picture grid (ranked) | the executable's tables agree pixel for pixel: **PNGs byte-identical** |
+| titleobj | grayscale indices | **exact** for 92 % of the art (only rows 108-111, between the words and the glow, are drawn by nothing) |
+| minigame `mg1\xx\Picture` | one ranked palette for everything | **exact** for 98.5 % of the art (US and JP; two 32-px letter cells and one piece are not in the table); the icons are pink/blue/green/red, the letter blocks white-dotted (the game tints them per sprite) |
+| window0-2 | ranked per 64-px block | **exact** for 78 % of the art (US; JP 77 %): letters, digits, words (ENEMY INFO red, ATTACKER pink), icons, gauges, tabs, frames, portrait faces |
+| ctrl | one palette | unchanged |
+
+(Percentages: non-zero index pixels outside the CLUT tiles that a bound
+rectangle covers.)
+
+**Correction:** the minigame sheet was listed as correct after the third
+pass; it was not (the ranked plan used one palette, tile (48,112), for the
+whole sheet). Its PNG changes.
+
+**Still open (no evidence found, left ranked):** about 22 % of the
+window0-2 art — the parts of the portrait cells outside the 26 x 45 face
+sprites (same palette as the face where the face is bound), the small
+portraits at x 448-512 / y 64-128 and x 256-320 / y 128-192, the GIL tag,
+the strip under the round icons (y 139-150) and a few frame pieces. They are
+drawn by code not traced yet (OV02's battle sprite path takes its CBP from
+data); a GS dump with those screens open would settle them.
+
+**What you have to do:** re-run `browse --kinds textures_png` (titleobj,
+minigame and window PNGs change; itemcap/segcap/ctrl do not). Index PNGs
+are unchanged. Re-export with `xtx-export` before importing an RGBA edit of
+those three sheets (the sidecar plan changed).
+
 ## 2026-11-20 (fourth pass) — item icons and thumbnails in one palette each, bidi = ICU, typed '$'
 
 **itemcap / segcap: no more palette seams** (`xtx_decode.plan_palettes`).
@@ -119,10 +182,12 @@ block that straddles two icons can take the neighbour's palette (in itemcap
 this reached inside icons: the gold ring was half silver; fixed in the fourth
 pass above); the flat UI parts of window0-2 (glyphs,
 gauges, frames) have no hue to rank and keep the base ramp or a guessed
-palette. The HUD letter and digit cells are exact through `xtx-export --bind
-statfont` (palette pointers from the executable). `titleobj` holds no
-palette at all (it comes from elsewhere in VRAM) and renders as grayscale
-indices. `*_index.png` is exact for every sheet.
+palette (mostly bound from the game code in the fifth pass). The HUD letter
+and digit cells are exact through `xtx-export --bind statfont` (palette
+pointers from the executable). `titleobj` holds no palette at all (it comes
+from elsewhere in VRAM) and renders as grayscale indices (wrong: its three
+alpha-ramp palettes are in the file, see the fifth pass). `*_index.png` is
+exact for every sheet.
 
 `xtx_encode` now takes its palette plan from the decoder
 (`xtx_decode.plan_palettes`), so `xtx-export`'s render equals `browse`'s

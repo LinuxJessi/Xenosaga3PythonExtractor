@@ -46,14 +46,15 @@ uses plus any engine-bound tiles passed in ``bindings``) are never taken from
 the PNG; edits that land there are counted and reported.
 
 Palette plan: which CLUT colours a pixel. The file does not record it (the
-engine sets CBP per draw). The plan is xtx_decode.plan_palettes verbatim (base
-palette + one palette per picture on itemcap/segcap, else per-64-px
-chroma-coherence rescue blocks, so the export render equals
-xtx_decode's RGBA) followed by ``bindings``: rectangles whose palette is known
-from the executable (statfont.BINDINGS: the HUD letter and digit cells, CBP
-0x308 / 0x3c8 / 0x30c). ``cbp_xy`` turns a GS CBP into canvas coordinates (TBW
-8, CT32 block order). Outside the bound rectangles the plan is a heuristic (see
-xtx_decode, "Colour status"); the index map is exact either way.
+engine sets CBP per draw). The plan is xtx_decode.plan_palettes verbatim (the
+ranked plan, then the engine's own draw rectangles and CBPs from
+engine_palettes: the executable's sprite tables and draw functions, OV01, OV04;
+so the export render equals xtx_decode's RGBA) followed by ``bindings``
+(statfont.BINDINGS: the HUD letter and digit cells, CBP 0x308 / 0x3c8 / 0x30c,
+which the engine rectangles already contain). ``cbp_xy`` turns a GS CBP into
+canvas coordinates (TBW 8, CT32 block order). Outside the engine rectangles the
+plan is a heuristic (see xtx_decode, "Colour status"); the index map is exact
+either way.
 
 Commands (``add_commands``):
 
@@ -296,13 +297,15 @@ class Plan:
         return m, tiles
 
 
-def auto_plan(sheet: Sheet, bindings: Sequence[Tuple[int, int, int, int, Tuple[int, int]]] = ()
-              ) -> Plan:
-    """xtx_decode.plan_palettes (base palette + picture grid or per-block chroma rescue), then ``bindings``."""
+def auto_plan(sheet: Sheet, bindings: Sequence[Tuple[int, int, int, int, Tuple[int, int]]] = (),
+              name: str = "") -> Plan:
+    """xtx_decode.plan_palettes (ranked plan, then the engine's own draw bindings
+    from engine_palettes), then ``bindings``. ``name``: the file name or disc path
+    (tells the US and JP minigame sheets apart when their CLUTs were edited)."""
     sheet._need8()
     cv, cw, ch = bytes(sheet.canvas), sheet.cw, sheet.ch
     W, H = cw * 2, ch * 2
-    base, rects, _pals = X.plan_palettes(cv, cw, ch, sheet.indices().tobytes(), W, H)
+    base, rects, _pals = X.plan_palettes(cv, cw, ch, sheet.indices().tobytes(), W, H, name)
     plan = Plan(base=tuple(base) if base else None,
                 rects=[(u0, v0, u1, v1, tuple(t)) for u0, v0, u1, v1, t in rects])
     for x0, y0, x1, y1, t in bindings:
@@ -343,7 +346,7 @@ def export_sheet(data: bytes, out_dir: Path, stem: str,
     if sheet.fmt == FMT_LINEAR:
         Image.fromarray(sheet.rgba_linear(), "RGBA").save(out_dir / f"{stem}.png")
     else:
-        plan = auto_plan(sheet, bindings)
+        plan = auto_plan(sheet, bindings, source or stem)
         Image.fromarray(render(sheet, plan), "RGBA").save(out_dir / f"{stem}.png")
         p = Image.fromarray(sheet.indices(), "P")
         lut = sheet.clut(*plan.base) if plan.base else [bytes((i, i, i, 255)) for i in range(256)]

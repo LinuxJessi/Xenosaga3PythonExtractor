@@ -153,7 +153,7 @@ the "FAC" version of XAP.
 
 | Ext   | Magic   | Notes |
 |-------|---------|-------|
-| `.xtx`| `XTX\0` + u32 size + u32 count + u32 hdr-size + u16 width + u16 fmt + u32 height … | MonolithSoft texture format. 750 across both discs (375 each, mostly the same UI textures). Used for character portraits in `kao/`, UI windows (`window0/1/2.xtx`, `ctrl.xtx`), menu icons. **All decoded to PNG under `browse/textures_png/`.** The 367 linear (fmt=0x04) per disc are straight 32bpp RGBA. The 8 swizzled (fmt=0x08) ones turned out to be the Xenosaga I layout: a CT32 canvas holding a PSMT8 8-bit image at 2× the header dimensions ("128×128" ctrl.xtx is really a 256×256 DualShock diagram), unswizzled with the standard PS2 `unswizzle8` routine. Pixels start at 0x50: the header offset (0x30) points at a 32-byte GS upload packet (DMA tag, VIF DIRECT, GIF IMAGE tag) and every file is exactly 0x50 + W×H×4 bytes. Their CSM1 palettes are embedded as 16×16 canvas tiles on the 16-word grid at the bottom of the canvas; the palette↔region binding lives in SLUS, so the decoder ranks them: base palette by spatial coherence, then one palette per picture where the sheet is a grid of as many pictures as palettes (itemcap, segcap), else per 64-px block by hue coherence. Item icons (itemcap), location thumbnails (segcap), portraits (window0-2) and the minigame sheet render in true colour; the flat UI parts of window0-2 are still a guess and titleobj (no parked palette) is grayscale — plus a `*_index.png` ground-truth index map. |
+| `.xtx`| `XTX\0` + u32 size + u32 count + u32 hdr-size + u16 width + u16 fmt + u32 height … | MonolithSoft texture format. 750 across both discs (375 each, mostly the same UI textures). Used for character portraits in `kao/`, UI windows (`window0/1/2.xtx`, `ctrl.xtx`), menu icons. **All decoded to PNG under `browse/textures_png/`.** The 367 linear (fmt=0x04) per disc are straight 32bpp RGBA. The 8 swizzled (fmt=0x08) ones turned out to be the Xenosaga I layout: a CT32 canvas holding a PSMT8 8-bit image at 2× the header dimensions ("128×128" ctrl.xtx is really a 256×256 DualShock diagram), unswizzled with the standard PS2 `unswizzle8` routine. Pixels start at 0x50: the header offset (0x30) points at a 32-byte GS upload packet (DMA tag, VIF DIRECT, GIF IMAGE tag) and every file is exactly 0x50 + W×H×4 bytes. Their CSM1 palettes are embedded as 16×16 canvas tiles on the 16-word grid at the bottom of the canvas; the palette↔region binding lives in the game code: SLUS sprite tables (VA 0x402c38 window sheets, 0x403728 itemcap, 0x403890 segcap) and draw functions, OV01 (title menu, titleobj) and OV04 (minigame table). `engine_palettes.py` carries them and the decoder applies them over a ranked plan (base palette by spatial coherence, one palette per picture on itemcap/segcap, else per 64-px block by hue). itemcap, segcap, titleobj and the minigame sheet are exact; window0-2 are exact wherever a known draw reaches (~78 % of the art), ranked elsewhere — plus a `*_index.png` ground-truth index map. |
 | `.txd`| 4 / 4 (`mnu/us/`) | **Text data, not textures**: an offset table + NUL-terminated strings with `$cmd;` layout codes. `menutext.txd` = the whole menu UI (907 strings; count-prefixed table variant), `synopsis.txd` (chapter synopses, bonus unlock text), `discchg.txd` (disc-change / save prompts), `devchk.txd` (memory-card messages). Decoded by the `text` kind as `*.txd.txt`. |
 | `.txy`| `txy\0` + u32 version | Texture block (pairs with `.pxy` of same stem). Carries the pixels (the same record as the package `txy`), not just an index. |
 | `.tm2`| `TIM2` magic | Sony's PS2 SDK image format. **Decoded to PNG**; in this game they are all 32bpp RGBA with no palette — chapter-select background (`haikei.tm2`) and episode logos (`logo_ep1`, `logo_ep2`, `logo_pp`). |
@@ -257,13 +257,14 @@ yet — they need format-specific work beyond the scope of this pipeline:
 - **Scene sound banks** (`.sb`) — `SB  ` magic + a table of section
   offsets; the payload looks like cue/sequence scripts (opcode streams)
   that reference samples in the `.dap` banks rather than embedded audio.
-- **Swizzled-XTX palette binding** — the per-region palette assignments
-  live in SLUS (not in OV02/OV04 — checked). Since the 0x50 pixel-offset fix
-  (2026-11-20) the decoder's hue ranking gets the pictures right (icons,
-  thumbnails, portraits); the flat UI parts of window0-2 and titleobj's
-  palette (not in the file) are still open. The exact fix is still to
-  capture the TEX0 CBP/CSA bindings from EE RAM with a menu open and ship
-  them as a per-sheet table.
+- **Swizzled-XTX palette binding** — mostly closed 2026-11-20 (fifth pass):
+  the per-region CBPs are in SLUS (sprite tables + draw functions), OV01
+  (titleobj, whose CLUTs are its own alpha-ramp tiles) and OV04 (the
+  minigame table; the earlier "not in OV02/OV04" note was wrong).
+  `engine_palettes.py` ships them as per-sheet tables. Open: the ~22 % of
+  window0-2 art no draw found so far reaches (portrait cells outside the face
+  sprites, a few small portraits and frame pieces); a GS dump with those
+  menus open would settle them.
 
 Formerly on this list, now decoded: **swizzled XTX textures** (PSMT8 in a
 CT32 canvas — the Xenosaga I layout) and **DTPK sound banks** (`.dap` →

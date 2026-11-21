@@ -40,7 +40,9 @@ holds a PSMT8 8-bit-indexed image of (2·width) × (2·height) pixels, exactly
 like Xenosaga I's XTX. The indices are recovered with the standard PS2
 "unswizzle8" routine. The 256-colour CSM1 palettes are parked inside the
 same canvas as 16×16 CT32 tiles (SLUS addresses them by GS block pointer,
-which the file itself does not record). Palette selection (``plan_palettes``):
+which the file itself does not record). Palette selection (``plan_palettes``)
+is the ranked plan of steps 1-5 below with the ENGINE's own bindings laid on
+top (step 6): wherever a draw found in the game code reaches, its CLUT wins.
 
 1. Candidates: 16×16 tiles whose 256 entries all have raw alpha ≤ 0x80, ≥ 64
    distinct colours and ≥ 26 entries at exactly 0x80. The opaque-entry test
@@ -76,21 +78,24 @@ which the file itself does not record). Palette selection (``plan_palettes``):
    keeps a dominant background index the base's colour; undecided blocks
    between agreeing decided neighbours inherit their palette.
 5. The CLUT tiles the plan uses are blanked from the output.
+6. Engine bindings (``engine_palettes``, new 2026-11-20 fifth pass): the
+   draw rectangles and CLUT pointers (CBP = sheet page * 32 + K, K a block
+   inside the sheet's own canvas) read from SLUS_213.89's sprite tables and
+   draw functions, OV01.OVL (title menu) and OV04.OVL (minigame), applied
+   largest first so a smaller draw wins where two overlap.
 
-Colour status (2026-11-20, after the packet fix and steps 1/3): the item
-icons (itemcap), the location thumbnails (segcap), the window-sheet
-portraits (KOS-MOS blue hair, Jr. red, MOMO pink, Chaos silver) and the
-minigame sheet (mg1 picture) render in their true colours; ctrl was already
-right. Still a heuristic, not the engine's binding. itemcap and segcap go
-through the picture grid (step 3) and have no block seams. On sheets that
-fall back to step 4, block edges (64 px) do not follow picture edges, so a
-block straddling two pictures can carry the neighbour's palette; the
-window sheets' flat UI glyphs, gauges and frames have no hue texture
-for step 3 and keep the base ramp (brownish) or a guessed palette — the HUD
-letter/digit cells are exact only through xtx_encode with statfont.BINDINGS
-(CBP from the executable). titleobj holds no parked CLUT at all (0 tiles
-pass step 1; its palette comes from elsewhere in VRAM) and renders as a
-grayscale identity of its indices (dark: they are 0..~104). The
+Colour status (2026-11-20, fifth pass): exact from the engine — itemcap and
+segcap (the executable's tables agree with step 3 pixel for pixel, so their
+PNGs did not change), titleobj (its three CLUTs are its own tiles (0,112)
+(16,112) (32,112): one colour each with an alpha ramp, which step 1 cannot
+see; before this pass it rendered as grayscale indices), the minigame sheet
+(OV04's table; the ranked plan had painted it in one wrong palette) and
+every drawn part of window0-2: about 78 % of their non-zero art pixels
+(the HUD letters/digits, words, icons, gauges, tabs, frames, the portrait
+faces). The rest of window0-2 (portrait cells outside the 26 x 45 face
+sprites, a few small portraits, some frame pieces) is reached by no draw
+found so far and keeps the ranked palette; where a portrait's face is bound
+the ranked palette of its cell is the same one. ctrl has one palette. The
 ``*_index.png`` written alongside is exact for every sheet.
 
 
@@ -473,10 +478,37 @@ def _picture_grid(im, luts) -> List[Tuple[int, int, int, int, int]] | None:
 
 
 def plan_palettes(canvas: bytes, canvas_w: int, canvas_h: int, idx: bytes,
-                  out_w: int, out_h: int
+                  out_w: int, out_h: int, name: str = ""
                   ) -> Tuple[Tuple[int, int] | None, List[Tuple[int, int, int, int, Tuple[int, int]]],
                              Dict[Tuple[int, int], List[bytes]]]:
     """Palette plan of a PSMT8 sheet: ``(base_tile, rects, palettes)``.
+
+    The ranked plan below (``_ranked_plan``), then the ENGINE's own bindings
+    on top (``engine_palettes.engine_rects``: draw rectangles and CLUT
+    pointers read from the executable and its overlays), so every pixel a
+    known draw reaches takes the palette the game uses and only the rest
+    keeps the ranked guess. ``name`` (a file name or disc path, optional)
+    tells the US and JP minigame sheets apart when their CLUTs were edited.
+    A sheet with no detectable CLUT but known draws (titleobj) takes the
+    largest draw's tile as its base."""
+    import engine_palettes
+    base, rects, pals = _ranked_plan(canvas, canvas_w, canvas_h, idx, out_w, out_h)
+    eng = engine_palettes.engine_rects(canvas_w, canvas_h, canvas, name)
+    if not eng:
+        return base, rects, pals
+    for *_r, xy in eng:
+        if xy not in pals:
+            pals[xy] = _clut_at(canvas, canvas_w, *xy)
+    if base is None:
+        base = eng[0][4]
+    return base, list(rects) + eng, pals
+
+
+def _ranked_plan(canvas: bytes, canvas_w: int, canvas_h: int, idx: bytes,
+                 out_w: int, out_h: int
+                 ) -> Tuple[Tuple[int, int] | None, List[Tuple[int, int, int, int, Tuple[int, int]]],
+                            Dict[Tuple[int, int], List[bytes]]]:
+    """The ranked (heuristic) palette plan: ``(base_tile, rects, palettes)``.
 
     ``base_tile`` is the BASE palette's canvas tile (None = no parked CLUT
     ranks; grayscale identity), ``rects`` are ``(u0, v0, u1, v1, tile)``
@@ -491,8 +523,9 @@ def plan_palettes(canvas: bytes, canvas_w: int, canvas_h: int, idx: bytes,
     the block (a background), colours that index like the base does (L1 ≤ 48);
     an undecided block between
     ≥ 3 decided neighbours (3×3) that agree takes their palette when that
-    keeps it as opaque as the base does. xtx_encode.auto_plan uses this
-    plan verbatim, so its export render equals this module's RGBA."""
+    keeps it as opaque as the base does. plan_palettes adds the engine
+    bindings on top; xtx_encode.auto_plan uses that plan verbatim, so its
+    export render equals this module's RGBA."""
     import numpy as np
     W, H = out_w, out_h
     uniq = _unique_cluts(canvas, canvas_w, canvas_h)
@@ -568,17 +601,18 @@ def tile_pixel_mask(canvas_w: int, canvas_h: int, tiles: Sequence[Tuple[int, int
     return bytemask[np.minimum(off, bytemask.size - 1)] & (off < bytemask.size)
 
 
-def decode_indexed(data: bytes) -> Tuple[XTXHeader, int, int, bytes, bytes]:
+def decode_indexed(data: bytes, name: str = "") -> Tuple[XTXHeader, int, int, bytes, bytes]:
     """Decode a fmt=0x08 file. Returns ``(header, out_w, out_h, indices,
     rgba)`` where ``indices`` is the raw PSMT8 index map (ground truth) and
     ``rgba`` is the render under ``plan_palettes`` (grayscale identity when
-    no palette tile ranks), with the CLUT tiles the plan uses blanked."""
+    no palette tile ranks and no engine draw is known), with the CLUT tiles
+    the plan uses blanked. ``name``: see plan_palettes."""
     import numpy as np
     hdr = parse_header(data)
     canvas = data[hdr.pixel_offset : hdr.pixel_offset + hdr.width * hdr.height * 4]
     out_w, out_h = hdr.width * 2, hdr.height * 2
     idx = _unswizzle8(canvas, hdr.width, out_w, out_h)
-    base, rects, pals = plan_palettes(canvas, hdr.width, hdr.height, idx, out_w, out_h)
+    base, rects, pals = plan_palettes(canvas, hdr.width, hdr.height, idx, out_w, out_h, name)
     im = np.frombuffer(idx, np.uint8).reshape(out_h, out_w)
     if base is None:
         lut = np.stack([np.arange(256)] * 3 + [np.full(256, 255)], -1).astype(np.uint8)
@@ -608,7 +642,7 @@ def decode(data: bytes) -> Tuple[XTXHeader, bytes]:
     return hdr, _scale_alpha(raw)
 
 
-def decode_to_png(data: bytes, out_path: Path) -> XTXHeader:
+def decode_to_png(data: bytes, out_path: Path, name: str | None = None) -> XTXHeader:
     """Decode and write a PNG (plus a ``*_index.png`` ground-truth map for
     swizzled files). Imports PIL only here so the parser stays import-clean
     for callers that just want headers."""
@@ -617,7 +651,7 @@ def decode_to_png(data: bytes, out_path: Path) -> XTXHeader:
     hdr = parse_header(data)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if hdr.fmt == 0x08:
-        hdr, out_w, out_h, idx, rgba = decode_indexed(data)
+        hdr, out_w, out_h, idx, rgba = decode_indexed(data, str(out_path) if name is None else name)
         Image.frombytes("RGBA", (out_w, out_h), rgba).save(out_path)
         index_path = out_path.with_name(out_path.stem + "_index.png")
         Image.frombytes("L", (out_w, out_h), idx).save(index_path)
@@ -784,12 +818,90 @@ def self_test() -> int:
         base, rects, pals = plan("mnu\\us\\window0.xtx")
         got = [rects.get((u, 0), base) for u in (256, 320, 384, 448)] + \
               [rects.get((u, 64), base) for u in (256, 320, 384, 448)]
-        check(len(pals) == 24 and got == [(x, 112) for x in range(128, 256, 16)],
+        b0 = disc.read("mnu\\us\\window0.xtx")
+        nclut = len(_unique_cluts(b0[0x50:], 512, 128))
+        check(nclut == 24 and got == [(x, 112) for x in range(128, 256, 16)],
               "window0: 24 parked CLUTs; the 8 portrait blocks take the 8 sorted palettes "
               "(128..240, 112) in order")
         base, rects, pals = plan("mnu\\us\\titleobj.xtx")
-        check(base is None and not pals, "titleobj: no parked CLUT (grayscale identity)")
+        check(base == (0, 112) and list(rects.values()) == [(0, 112), (16, 112), (32, 112)],
+              "titleobj: the three OV01 title-menu CLUTs (0x308/0x30c/0x318 = its own tiles "
+              "(0,112) grey, (16,112) cyan, (32,112) white)")
+        _engine_disc_checks(disc, "us", check)
+    iso = os.environ.get("XS3_JP1")
+    if iso and Path(iso).exists():
+        with Disc(iso) as disc:
+            _engine_disc_checks(disc, "jp", check)
+    else:
+        print("SKIP XS3_JP1 not set")
     return 1 if bad else 0
+
+
+def _engine_disc_checks(disc, region: str, check) -> None:
+    """engine_palettes against one disc: its tables re-read from the boot
+    executable and the overlays, and the decoder drawing each bound rect with
+    the bound CLUT (itemcap/segcap: no pixel changes against the ranked plan)."""
+    import numpy as np
+    import engine_palettes as E
+    elf = disc.read(disc.boot_elf_name())
+    ov01, ov04 = disc.read("OV01.OVL"), disc.read("OV04.OVL")
+    win = list(E.WINDOW_SPRITES) if region == "us" else \
+        [e for k, e in enumerate(E.WINDOW_SPRITES) if not 89 <= k <= 114]
+    off = E.find_table(elf, E.WINDOW_SPRITES)
+    check(off is not None and E.read_table(elf, off, len(win)) == win,
+          f"{region}: window sprite table re-read from {disc.boot_elf_name()} "
+          f"({len(win)} entries{'' if region == 'us' else ', no lowercase block'})")
+    for nm, tab in (("itemcap", E.ITEMCAP_SPRITES), ("segcap", E.SEGCAP_SPRITES)):
+        off = E.find_table(elf, tab)
+        check(off is not None and E.read_table(elf, off, len(tab)) == list(tab),
+              f"{region}: {nm} sprite table re-read from the executable")
+    mg = E.MINIGAME_SPRITES_US if region == "us" else E.MINIGAME_SPRITES_JP
+    off = E.find_table(ov04, mg, first=10)
+    check(off is not None and E.read_table(ov04, off, len(mg)) == list(mg),
+          f"{region}: minigame sprite table re-read from OV04.OVL")
+    check(E.title_cbps(ov01) == [0x318, 0x30C, 0x308], f"{region}: OV01 title menu CBPs 0x318/0x30c/0x308")
+    pic = disc.read(f"mg1\\{region}\\Picture.xtx")
+    check(E.sheet_kind(256, 128, pic[0x50:]) == f"minigame-{region}"
+          and E.sheet_kind(256, 128, b"", f"mg1/{region}/Picture.png") == f"minigame-{region}",
+          f"{region}: minigame sheet recognised by its CLUT block and by its path")
+    lang = region
+    for path in (f"mnu\\{lang}\\window0.xtx", f"mnu\\{lang}\\titleobj.xtx", f"mg1\\{lang}\\Picture.xtx"):
+        b = disc.read(path)
+        hh = parse_header(b)
+        cv = b[hh.pixel_offset:hh.pixel_offset + hh.width * hh.height * 4]
+        W, H = hh.width * 2, hh.height * 2
+        _h, _w, _hh, idx, rgba = decode_indexed(b)        # no name: retail CLUT fingerprint
+        im = np.frombuffer(idx, np.uint8).reshape(H, W)
+        out = np.frombuffer(rgba, np.uint8).reshape(H, W, 4)
+        eng = E.engine_rects(hh.width, hh.height, cv)
+        owner = np.full((H, W), -1)
+        for n, (u0, v0, u1, v1, _t) in enumerate(eng):
+            owner[v0:v1, u0:u1] = n
+        blank = tile_pixel_mask(hh.width, hh.height, sorted({r[4] for r in eng}))
+        ok = bool(eng)
+        for n, (*_r, t) in enumerate(eng):
+            lut = np.frombuffer(b"".join(_clut_at(cv, hh.width, *t)), np.uint8).reshape(256, 4)
+            sel = (owner == n) & ~blank
+            ok = ok and np.array_equal(out[sel], lut[im[sel]])
+        check(ok, f"{region}: {path} — every pixel of the {len(eng)} engine rects drawn with its "
+                  f"CLUT ({100 * E.coverage(hh.width, hh.height, idx, cv):.0f}% of the non-zero "
+                  "indices covered)")
+    for path in ("mnu\\itemcap.xtx", "mnu\\segcap.xtx"):
+        b = disc.read(path)
+        hh = parse_header(b)
+        cv = b[hh.pixel_offset:hh.pixel_offset + hh.width * hh.height * 4]
+        W, H = hh.width * 2, hh.height * 2
+        idx = _unswizzle8(cv, hh.width, W, H)
+        base, rects, pals = _ranked_plan(cv, hh.width, hh.height, idx, W, H)
+        m = np.zeros((H, W), np.int64)
+        m[:] = base[0] << 16 | base[1]
+        for u0, v0, u1, v1, t in rects:
+            m[v0:v1, u0:u1] = t[0] << 16 | t[1]
+        ok = True
+        for u0, v0, u1, v1, t in E.engine_rects(hh.width, hh.height, cv):
+            ok = ok and bool((m[v0:v1, u0:u1] == (t[0] << 16 | t[1])).all())
+        check(ok, f"{region}: {path} — the executable's sprite table agrees with the ranked "
+                  "picture-grid plan pixel for pixel")
 
 
 __all__ = [
