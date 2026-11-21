@@ -180,10 +180,16 @@ models under `mg1/`) are swept too.
   have 125 vertices that use a matrix slot past the end of their node's
   joint list. Those vertices are left on the skeleton root (they do not
   follow any bone); the `.glb` lists that in its `extras.warnings`.
-* **A few maps have no mesh** (an empty slot in the package); the CSV
-  says `empty`. Three more (`E3_HAK16.map`, `E3_HAK01_EV03.map` and its
-  standalone `.pxy`) have a full mesh slot that decodes to nothing; the
-  CSV says `unexplained` and no `.glb` is written.
+* **20 packages have no mesh**, and the CSV says `empty`. The data
+  really is empty: 19 maps are 128-byte stubs, and `shion_sp01a.wpn`
+  holds only a motion. Nothing is lost.
+* **Animated map parts come at rest.** 310 maps carry a second mesh, the
+  pxy at header +0xD0 (ships, rubble, crystals, moving floors). It is
+  exported under a node named after it. Its motion (the `PAM` block) is
+  not decoded yet, so those parts sit in their rest pose. `E3_HAK16.map`
+  and `E3_HAK01_EV03` keep their whole mesh there. They used to be
+  `unexplained` and now convert. `E3_HAK16` is wrapped in a large `BG`
+  shell, so hide `BG` to see the floors inside.
 * **Not yet checked against the running game:** whether models are
   mirrored, the colour scale, and which materials should be transparent.
   If something looks wrong in one of those ways, that is a real report:

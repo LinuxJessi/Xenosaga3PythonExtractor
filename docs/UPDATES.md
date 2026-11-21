@@ -5,6 +5,47 @@ to benefit from it. (Same convention as the Xenosaga I kit's
 `docs/UPDATES.md`; this file starts with the first improvement run ported
 back from that project.)
 
+## 2026-11-20 (fifth pass): the second pxy in maps; the three "unexplained" maps convert
+
+**Maps carry a second pxy at header +0xD0** (`pxy.py`, `models_sweep.py`;
+[MODELS.md](MODELS.md#a-second-pxy-at-header-0xd0)). Header words
+0xC0..0xFF are eight (offset, size) slots. Slot 2 (+0xD0) points at a
+second, complete pxy inside the first. The game draws the first pxy and
+then this one (`FUN_00290590` calls `FUN_001a1d18` on both), and animates
+its node matrices with the `"PAM "` block in slot 7 (`FUN_0028d760`).
+It holds a map's moving parts: ships, rubble, crystals. 310 models have
+one, on every disc. The kit used to skip it, so those maps came out
+without their animated parts. It is now parsed, checked and exported
+under a node named after the inner pxy (rest pose; `PAM` is not decoded).
+
+- `E3_HAK16.map`, `E3_HAK01_EV03.map` and `map\ev\E3_HAK01_EV03.pxy` were
+  this case with an empty outer pxy (0 draws, header triangles 0). All of
+  their mesh is the inner pxy: 20,244 and 576 triangles. They now convert
+  and pass, and Blender shows the HAK16 tree-tower floors and the
+  16-crystal ring.
+- Every disc (USA 1/2, Japan 1/2, May 2006 prototype): 1,609 models,
+  **1,589 ok**, 20 empty, **0 unexplained**, 0 failures. Triangles:
+  8,785,068 (USA), 8,786,499 (Japan), 8,785,114 (prototype). 779,435 of
+  them come from the +0xD0 pxys.
+- Before/after on USA Disc 1: 1,299 rows of `models.csv` are identical.
+  307 rows that were already ok gain exactly the inner pxy's triangles
+  (and its textures), with no new failures. The 3 unexplained rows are
+  now ok.
+- The 20 empty mesh slots are empty in the data. The 19 maps are 76-byte
+  files on every disc and expand to a 128-byte stub whose `pxy`, `txy` and
+  `id` slots all have size 0. `shion_sp01a.wpn` holds only a 9,344-byte
+  `xap` motion.
+- The "strips face one way" gate counts a triangle with an edge under
+  1e-5 of its longest edge as degenerate. This change is needed for the
+  crystal tips in the `E3_REN08`/`E3_REN09` inner pxys, and it changes no
+  other model's status.
+- The self-test's `E3_HAK16` disc check now expects `ok` with tris ==
+  header and a `.glb` written. `pxy.py --self-test` covers a +0xD0 pxy
+  and an empty outer shell.
+
+**To benefit:** re-run `models` (or `model` for one map). Maps with
+animated parts now include them.
+
 ## 2026-11-20 (fourth pass) — item icons and thumbnails in one palette each, bidi = ICU, typed '$'
 
 **itemcap / segcap: no more palette seams** (`xtx_decode.plan_palettes`).
