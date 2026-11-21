@@ -1,10 +1,22 @@
-# Core extraction (prep/scan/extract/verify/map-regions/toc/doctor) needs no
-# Python deps — only 7-Zip on PATH.
+# Runtime dependencies for the Xenosaga III extractor kit. All of them are
+# REQUIRED: the app bundles carry them, and the launchers (launch.command,
+# launch.bat, launch.sh) install them into .venv/ on first run when the Python
+# they find lacks any of them. No command falls back to a worse path when one
+# is missing; `python cli.py self-test` fails instead.
 #
-# Optional deps below are loaded lazily by individual subcommands.
-
-# `browse --kinds=textures_png` (XTX/TM2 -> PNG decode)
-Pillow>=9.0
-
-# `disasm` (MIPS disassembly + lui/addiu string xrefs)
-capstone>=5.0
+#   python -m pip install -r requirements.txt
+#
+numpy>=1.21        # models (vif/pxy/xhr/gltf/models_sweep), fonts (font.py), pictures, region checks
+Pillow>=10.0       # textures and pictures to/from PNG (xtx_decode/xtx_encode, imagetext, statfont, glyphs); 10.0+ for JPEG restart markers
+capstone>=5.0      # `disasm` (MIPS R5900 disassembly + lui/addiu string xrefs)
+fonttools>=4.40    # reading TrueType/OpenType fonts for new glyphs (glyphs.py, langpack.py)
+uharfbuzz>=0.37    # text shaping for new scripts (glyphs.py, langpack.py `lang`)
+#
+# Programs found on PATH or bundled under tools/ (see packaging/):
+#   7-Zip       `prep` (the 7-Zip extraction pipeline; the direct-from-ISO
+#               commands list/dump/model/text-export do not need it)
+#   ffmpeg      `browse` audio (.adx) and movies (.sfd)
+#   Blender     `blend` (builds a .blend in the background); not needed otherwise
+#
+# Building the Windows release (packaging/xenosaga-extractor.spec) also needs
+# PyInstaller:   python -m pip install pyinstaller

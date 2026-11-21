@@ -13,13 +13,41 @@ Workflow:
 
 The pipeline only writes outside the ``--out`` directory during ``extract``,
 so it's safe to repeatedly re-run scan/verify while iterating.
+
+Direct-from-ISO commands (no 7-Zip, no static lba/ tables; every module
+registers its own subcommands through ``add_commands``, see COMMAND_MODULES).
+They read the USA discs, the May 2006 prototype and the Japan discs:
+
+    list / dump / iso-ls / toc-check   the disc's own X3.x0 index (disc.py, iso9660.py, toc_bin.py)
+    region / resolve            build profile + address checks, engine paths (region.py)
+    patch                       write files into COPIES of one disc or a pair (patch.py)
+    repack-* / chr-iso-*        older single-ISO, in-place writers (repack.py, chrtex.py)
+    model / models / glb-info / blend   models to glTF and .blend (models_sweep.py, gltf.py, blend.py)
+    text-export / text-import / text-roundtrip / align-export
+                                game text out and back in, JP<->EN alignment
+                                (textpack.py, align.py)
+    text-decode / sb-strings / txd-strings / nj-strings / subtitle-text /
+    msgdat-strings / batdat-strings   one container at a time
+    lang scan|encode|import|preview   new scripts in the game fonts (langpack.py)
+    font-extract / font-rebuild / font-measure / font-donor   fonts (font.py)
+    glyphs-slots / -coverage / -render / -apply / -unlock     glyph slots (glyphs.py)
+    statfont-export / statfont-import   battle HUD letters (statfont.py)
+    xtx-export / xtx-encode / image-export / image-import    pictures (xtx_encode.py, imagetext.py)
+    gui                         the local web GUI (gui.py)
+    self-test                   every module's self-test
+
+The disc self-tests read XS3_D1 / XS3_D2 / XS3_PROTO / XS3_JP1 / XS3_JP2 (ISO
+paths) from the environment and print SKIP for their disc checks when those
+are unset.
 """
 from __future__ import annotations
 
 import argparse
+import importlib
+import os
 import sys
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 import browse_bundle
 import chrtex
@@ -370,9 +398,86 @@ def cmd_repack_tree(args: argparse.Namespace) -> None:
 # Argument parser
 # ---------------------------------------------------------------------------
 
+# Modules that register their own subcommands (``add_commands(subparsers)``).
+# Library modules whose add_commands registers nothing are listed too, so a
+# command added to them later is wired without touching this file.
+COMMAND_MODULES = (
+    "iso9660", "toc_bin", "chains", "disc", "region", "patch", "repack",
+    "textcodec", "sb", "txd", "njbin", "subtitle", "msgdat", "batdat",
+    "textpack", "align", "langpack",
+    "font", "glyphs", "statfont",
+    "xtx_encode", "imagetext", "chrtex",
+    "vif", "gltf", "xhr", "pxy", "models_sweep", "blend",
+    "gui",
+)
+
+# Modules whose own exception classes are user-facing refusals (see main()).
+_KIT_MODULES = frozenset(COMMAND_MODULES) | {"chrtex", "xcpack", "textcodec", "msgdat", "batdat",
+                                             "xtx_decode", "tm2_decode", "containers", "regions",
+                                             "dap_decode", "disasm_code", "lba", "toc", "repack"}
+
+# Every module with a self_test(); `self-test` imports each one strictly.
+SELF_TESTS = (
+    "iso9660", "toc_bin", "chains", "disc", "region", "patch", "repack",
+    "textcodec", "sb", "txd", "njbin", "subtitle", "msgdat", "batdat",
+    "textpack", "align", "langpack",
+    "font", "glyphs", "statfont",
+    "xtx_decode", "xtx_encode", "imagetext", "chrtex",
+    "vif", "gltf", "xhr", "pxy", "models_sweep", "blend",
+    "browse_bundle", "gui",
+)
+
+# Import failures met while registering module commands (name -> error).
+# A missing module or requirement is never skipped quietly: every command
+# but `self-test` refuses to run while this is non-empty.
+IMPORT_ERRORS: Dict[str, str] = {}
+
+_REQ_HINT = "install the requirements: python -m pip install -r requirements.txt"
+
+
+def cmd_self_test(args: argparse.Namespace) -> int:
+    rc = 0
+    failed = []
+    for name in SELF_TESTS:
+        try:
+            mod = importlib.import_module(name)
+        except ImportError as e:            # a missing module or requirement fails the run
+            print(f"--- {name}: FAILED to import ({e}); {_REQ_HINT}", flush=True)
+            failed.append(name)
+            rc |= 1
+            continue
+        print(f"--- {name}", flush=True)
+        try:
+            r = mod.self_test() or 0
+        except Exception as e:              # a crash is a failure, not a skip
+            import traceback
+            traceback.print_exc()
+            print(f"--- {name}: self_test raised {type(e).__name__}: {e}", flush=True)
+            r = 1
+        if r:
+            failed.append(name)
+            rc |= 1
+    print(f"=== self-test: {len(SELF_TESTS) - len(failed)}/{len(SELF_TESTS)} modules passed"
+          + (f"; FAILED: {', '.join(failed)}" if failed else ""), flush=True)
+    return rc
+
+
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Xenosaga III Python Extractor")
     sp = ap.add_subparsers(dest="cmd", required=True)
+
+    st = sp.add_parser("self-test", help="run every module's self-test "
+                       "(disc checks read XS3_D1 / XS3_D2 / XS3_PROTO / XS3_JP1 / XS3_JP2)")
+    st.set_defaults(func=cmd_self_test)
+
+    IMPORT_ERRORS.clear()
+    for name in COMMAND_MODULES:
+        try:
+            mod = importlib.import_module(name)
+        except ImportError as e:
+            IMPORT_ERRORS[name] = str(e)
+            continue
+        mod.add_commands(sp)
 
     p = sp.add_parser("prep", help="List ISO and extract X3.* with 7-Zip")
     p.add_argument("--iso", required=True)
@@ -445,7 +550,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "browse",
         help="Build a sibling browse/ tree of viewable / playable formats",
     )
-    b.add_argument("--dump", required=True, help="The dump/ directory produced by `extract`")
+    b.add_argument("--dump", required=True,
+                   help="The dump/ directory produced by `dump` (any build) or `extract`")
     b.add_argument("--stage", required=True, help="Fast scratch directory for ffmpeg output")
     b.add_argument("--out", help="Final destination (omit to leave outputs in --stage)")
     b.add_argument("--ffmpeg", default="ffmpeg", help="Path to ffmpeg (default: from PATH)")
@@ -456,11 +562,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--kinds",
         help=(
             "Comma-separated bundle categories: images,text,textures,textures_png,"
-            "package_textures,audio,soundbanks,movies,carved. Default: all. "
+            "package_textures,audio,soundbanks,movies,carved,models. Default: all. "
             "package_textures decodes the textures inside .chr/.wpn/.map packages "
-            "and .esd/.esp/.sme effect files (pure Python, several minutes)."
+            "and .esd/.esp/.sme effect files (pure Python, several minutes); "
+            "models writes every model as .glb plus models.csv."
         ),
     )
+    b.add_argument("--region", choices=("auto", "us", "proto_2006_05", "jp"), default="auto",
+                   help="build the dump came from, for the text readers (default: detect "
+                        "from the dump's boot executable or its mnu\\xx language folder)")
     b.set_defaults(func=cmd_browse)
 
     ce = sp.add_parser(
@@ -511,18 +621,18 @@ def _build_parser() -> argparse.ArgumentParser:
     cr.add_argument("--hue", type=float, default=0.92, help="target hue 0..1 (default rose pink)")
     cr.set_defaults(func=cmd_chr_recolor)
 
-    xe = sp.add_parser("chr-iso-extract", help="Pull one file out of an ISO via the Lba tables")
+    xe = sp.add_parser("chr-iso-extract", help="Pull one file out of an ISO (any build; the disc's own index)")
     xe.add_argument("--iso", required=True)
     xe.add_argument("--path", required=True, help=r"disc path, e.g. \mdl\chr\pc\C3shion00.chr")
     xe.add_argument("--out", required=True)
-    xe.add_argument("--lba", help="dir with Lba0.txt (default: the kit's lba/)")
+    xe.add_argument("--lba", help=argparse.SUPPRESS)
     xe.set_defaults(func=cmd_chr_iso_extract)
 
-    xp = sp.add_parser("chr-iso-patch", help="Write a same-size file back into an ISO (verified)")
+    xp = sp.add_parser("chr-iso-patch", help="Write a same-size file back into an ISO in place (verified; for copies and pairs use patch)")
     xp.add_argument("--iso", required=True)
     xp.add_argument("--path", required=True)
     xp.add_argument("--file", required=True)
-    xp.add_argument("--lba", help="dir with Lba0.txt (default: the kit's lba/)")
+    xp.add_argument("--lba", help=argparse.SUPPRESS)
     xp.set_defaults(func=cmd_chr_iso_patch)
 
     xs = sp.add_parser("chr-iso-sweep",
@@ -531,29 +641,29 @@ def _build_parser() -> argparse.ArgumentParser:
     xs.add_argument("--match", required=True, help="filename substring, e.g. kosmos or shion")
     xs.add_argument("--mode", choices=["blue", "warm"], required=True)
     xs.add_argument("--hue", type=float, default=0.92)
-    xs.add_argument("--lba", help="dir with Lba0.txt (default: the kit's lba/)")
+    xs.add_argument("--lba", help=argparse.SUPPRESS)
     xs.set_defaults(func=cmd_chr_iso_sweep)
 
-    ri = sp.add_parser("repack-info", help="Where a disc file lives in the ISO + its slack")
+    ri = sp.add_parser("repack-info", help="Where a disc file lives in the ISO, its slack and the files sharing its sectors")
     ri.add_argument("--iso", required=True)
     ri.add_argument("--path", required=True, help=r"in-game path, e.g. \snd\adx\bgm\...")
-    ri.add_argument("--lba", help="dir with Lba*.txt (default: the kit's lba/)")
+    ri.add_argument("--lba", help=argparse.SUPPRESS)
     ri.set_defaults(func=cmd_repack_info)
 
     re_ = sp.add_parser("repack-extract", help="Pull any one file out of an ISO")
     re_.add_argument("--iso", required=True)
     re_.add_argument("--path", required=True)
     re_.add_argument("--out", required=True)
-    re_.add_argument("--lba", help="dir with Lba*.txt (default: the kit's lba/)")
+    re_.add_argument("--lba", help=argparse.SUPPRESS)
     re_.set_defaults(func=cmd_repack_extract)
 
-    rp = sp.add_parser("repack-patch", help="Write any one file back into an ISO (verified)")
+    rp = sp.add_parser("repack-patch", help="Write any one file back into an ISO in place (verified; for copies and pairs use patch)")
     rp.add_argument("--iso", required=True, help="work on a COPY of your ISO")
     rp.add_argument("--path", required=True)
     rp.add_argument("--file", required=True)
     rp.add_argument("--pad", action="store_true",
                     help="allow a different size up to the sector allocation (zero-padded)")
-    rp.add_argument("--lba", help="dir with Lba*.txt (default: the kit's lba/)")
+    rp.add_argument("--lba", help=argparse.SUPPRESS)
     rp.set_defaults(func=cmd_repack_patch)
 
     rt = sp.add_parser("repack-tree",
@@ -563,12 +673,12 @@ def _build_parser() -> argparse.ArgumentParser:
                     help=r"mod dir mirroring the game tree (mod/mdl/chr/... = \mdl\chr\...)")
     rt.add_argument("--pad", action="store_true")
     rt.add_argument("--dry-run", action="store_true")
-    rt.add_argument("--lba", help="dir with Lba*.txt (default: the kit's lba/)")
+    rt.add_argument("--lba", help=argparse.SUPPRESS)
     rt.set_defaults(func=cmd_repack_tree)
 
     da = sp.add_parser(
         "disasm",
-        help="Disassemble PS2 ELFs (SLUS / OVL) and emit string xrefs. Needs `pip install capstone`.",
+        help="Disassemble PS2 ELFs (SLUS / OVL) and emit string xrefs (capstone, a kit requirement).",
     )
     da.add_argument("--code-dir", required=True, help="Directory with extracted SLUS/OVL files")
     da.add_argument(
@@ -580,6 +690,10 @@ def _build_parser() -> argparse.ArgumentParser:
     da.set_defaults(func=cmd_disasm)
 
     return ap
+
+
+# Public name for tools that build on the parser (a schema-driven GUI).
+build_parser = _build_parser
 
 
 def cmd_xc_unpack(args: argparse.Namespace) -> None:
@@ -610,8 +724,10 @@ def cmd_browse(args: argparse.Namespace) -> None:
         sfd_preset=args.sfd_preset,
         sfd_crf=args.sfd_crf,
         kinds=kinds,
+        region=None if args.region == "auto" else args.region,
     )
-    if stats.audio_err or stats.soundbanks_err or stats.movies_err or stats.textures_png_err:
+    if (stats.audio_err or stats.soundbanks_err or stats.movies_err
+            or stats.textures_png_err or stats.models_err):
         sys.exit(1)
 
 
@@ -648,11 +764,35 @@ def cmd_disasm(args: argparse.Namespace) -> None:
 
 def main(argv: List[str] | None = None) -> None:
     ap = _build_parser()
+    if IMPORT_ERRORS:
+        # a module that failed to import registered no commands: say why before
+        # argparse answers "invalid choice" for one of them
+        words = sys.argv[1:] if argv is None else list(argv)
+        first = next((w for w in words if not w.startswith("-")), None)
+        choices = next((a.choices for a in ap._actions if isinstance(a, argparse._SubParsersAction)), {})
+        if first is not None and first not in choices:
+            for name, err in IMPORT_ERRORS.items():
+                print(f"[cli] cannot load {name}.py: {err}", file=sys.stderr)
+            raise SystemExit(f"[cli] {first!r} is not available (its module did not load, or the name is "
+                             f"wrong). {_REQ_HINT}")
     args = ap.parse_args(argv)
+    if IMPORT_ERRORS and args.func is not cmd_self_test:
+        for name, err in IMPORT_ERRORS.items():
+            print(f"[cli] cannot load {name}.py: {err}", file=sys.stderr)
+        raise SystemExit(f"[cli] {_REQ_HINT}")
     try:
-        args.func(args)
-    except (chrtex.ChrError, xcpack.XcError) as exc:
-        raise SystemExit(f"[{args.cmd if hasattr(args, 'cmd') else 'error'}] {exc}")
+        rc = args.func(args)
+    except Exception as exc:                                       # noqa: BLE001 - filtered below
+        # A refusal raised by the kit itself (TextError, PatchError, DiscError, ...: any
+        # exception class defined in one of this kit's modules) is a one-line message,
+        # not a traceback; anything else is a bug and keeps its traceback.
+        # XS3_TRACEBACK=1 shows the traceback for refusals too.
+        mod = type(exc).__module__.split(".")[0]
+        if os.environ.get("XS3_TRACEBACK") or not (mod in _KIT_MODULES or isinstance(exc, FileNotFoundError)):
+            raise
+        raise SystemExit(f"[{getattr(args, 'cmd', None) or 'error'}] {exc}")
+    if isinstance(rc, int) and rc:
+        sys.exit(rc)
 
 
 if __name__ == "__main__":

@@ -16,8 +16,10 @@ under the stage tree, with one of a handful of conversion strategies:
 * ``textures_png`` — decode ``.xtx``/``.tm2`` to PNG under ``textures_png/``.
                      Linear 32-bpp RGBA files decode directly; the 8
                      GS-swizzled 8-bpp files per disc are unswizzled and
-                     paletted by coherence-ranked CLUT selection (shape is
-                     right, tint is known-wrong — sepia/grey — fix planned;
+                     paletted from the CLUT tiles parked in the sheet (base
+                     palette + per-block chroma rescue: item icons, location
+                     thumbnails and portraits in true colour; flat UI parts
+                     of the window sheets still a guess, titleobj grayscale;
                      see xtx_decode.py) plus a ``*_index.png`` ground-truth
                      map.
 * ``package_textures`` — decode every texture that lives INSIDE another file:
@@ -36,6 +38,28 @@ under the stage tree, with one of a handful of conversion strategies:
                      ffmpeg into ``movies/``.
 * ``carved``       — carve every JPG embedded in ``credit.bin`` (and any other
                      listed container) into ``images/<rel>/<prefix>_NN.jpg``.
+* ``models``       — every model (``.chr``/``.wpn``/``.map`` packages and the
+                     standalone ``.pxy``) as glTF binary under
+                     ``models/<path>.glb`` plus ``models/models.csv``
+                     (models_sweep.browse_models; see docs/MODELS.md).
+
+Text is read with textcodec.py, following the build the dump came from
+(``detect_dump_region``: the boot executable's sha256 when the dump holds
+it, else the language folder of ``mnu\\xx\\menutext.txd``; ``--region``
+overrides). USA and the May 2006 prototype: the USA display reading
+(``UsCodec``) for strings the game draws, ``NoteCodec`` (per-string Shift-JIS
+/ EUC-JP / USA) for the developers' notes inside .sb scene scripts. Japan
+(SLPS_256.40/41): the JP print reading (``JpCodec``, lead >= 0xA0) for every
+string, notes included. The containers are parsed by their own modules (sb,
+txd, njbin, msgdat, batdat, subtitle); the ASCII sniff is only a USA fallback
+for unparsed .bin/.dat files. Movie/event subtitles and .mes files also get a
+UTF-8 ``*.utf8.txt`` reading next to the raw copy. On a JP dump the 140 JP-only
+scenes (sb.JP_ONLY_SB, + bat mom1_b02) are marked "JP-only, load status
+unknown" in their ``.strings.txt`` and listed in ``text/JP-ONLY.txt``. JP keeps
+jpg\\, ef\\map\\, ef\\esp\\ and mnu\\pse\\ files at the folder root where USA has
+``\\us\\`` (region.py M27); the kinds pick files by extension, so both layouts
+are covered. Every byte the codecs cannot show as a character is written as a
+``⟦XX⟧`` escape, so the text files are an exact reading of the bytes.
 
 The stage directory should be on fast local storage; pass ``--out`` to
 mirror to a final destination at the end (single rsync per disc instead of
@@ -54,9 +78,60 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Optional, Set, Tuple
 
+import re
+
+import region as region_mod
+import sb as sb_mod
+import subtitle as subtitle_mod
+import textcodec
+import txd as txd_mod
+
+_US = textcodec.UsCodec()
+_TOP = re.compile(r"^(chain\d+|iso(-disc\d+)?)$", re.I)
+
+
+def game_path(rel: Path) -> str:
+    """The in-game path (backslashes, no leading one) of a file under a dump: the
+    ``chainN/`` / ``iso/`` folder that ``disc.py dump`` writes is dropped."""
+    parts = list(rel.parts)
+    if parts and _TOP.match(parts[0]):
+        parts = parts[1:]
+    return "\\".join(parts)
+
+
+def detect_dump_region(dump_root: Path) -> "region_mod.Region":
+    """The build profile of a dump tree: the sha256 of a boot executable in it
+    (SLUS_*/SLPS_* as ``dump --fs`` writes it) matched against region.PROFILES,
+    else the language folder holding ``menutext.txd`` (region.lang_of: jp -> JP,
+    us -> USA). USA when neither is found."""
+    import hashlib
+    for pat in ("SLUS_*", "SLPS_*", "*/SLUS_*", "*/SLPS_*"):
+        for exe in sorted(dump_root.glob(pat)):
+            if not exe.is_file():
+                continue
+            sha = hashlib.sha256(exe.read_bytes()).hexdigest()
+            for p in region_mod.PROFILES:
+                if sha == p.exe_sha256:
+                    return p
+    paths = [game_path(m.relative_to(dump_root)) for m in dump_root.rglob("menutext.txd")]
+    lang = region_mod.lang_of(paths)
+    for p in region_mod.PROFILES:
+        if lang and p.lang == lang and p.name != "proto_2006_05":
+            return p
+    return region_mod.US
+
+
+def _items(obj) -> list:
+    it = obj.items
+    return it() if callable(it) else it
+
+
+def _item_text(item) -> str:
+    return textcodec.codec_by_name(item.codec).to_text(item.raw)
+
 
 ALL_KINDS = ("images", "text", "textures", "textures_png", "package_textures",
-             "audio", "soundbanks", "movies", "carved")
+             "audio", "soundbanks", "movies", "carved", "models")
 
 
 # Common install locations for ffmpeg on each OS, used when ``ffmpeg`` isn't
@@ -168,6 +243,9 @@ class BundleStats:
     package_decompressed: int = 0
     sme_banks: int = 0
     sme_cues: int = 0
+    models_ok: int = 0
+    models_empty: int = 0
+    models_err: int = 0
     errors: List[str] = field(default_factory=list)
 
     def total_ok(self) -> int:
@@ -226,6 +304,7 @@ def _convert_one(
     ffmpeg: str,
     sfd_args: List[str],
     kinds: Set[str],
+    region=None,
 ) -> Tuple[str, Optional[str], int]:
     rel = in_path.relative_to(dump_root)
     ext = in_path.suffix.lower()
@@ -247,7 +326,7 @@ def _convert_one(
             # menu text table: u32 offset table (first offset / 4 = count)
             # then NUL-terminated strings with $cmd; control codes
             try:
-                lines = decode_txd(in_path.read_bytes())
+                lines = decode_txd(in_path.read_bytes(), region)
             except ValueError as exc:
                 return ("text", f"TXD {rel}: {exc}", 0)
             dest.with_suffix(".txd.txt").write_text(
@@ -255,6 +334,13 @@ def _convert_one(
                 encoding="utf-8")
             return ("text_txd", None, 0)
         shutil.copy2(in_path, dest)
+        gpath = game_path(rel)
+        if subtitle_mod.role(gpath, region) in ("movie", "event", "pse-mes", "pse-script"):
+            try:
+                _name, text = subtitle_mod.to_text(gpath, in_path.read_bytes(), region)
+                dest.with_name(dest.name + ".utf8.txt").write_text(text, encoding="utf-8")
+            except (ValueError, UnicodeError) as exc:
+                return ("text", f"subtitle {rel}: {exc}", 0)
         return ("text", None, 0)
 
     if "textures" in kinds and ext in _EXTS["textures"]:
@@ -337,39 +423,13 @@ def _carve_jpegs(dump_root: Path, stage_root: Path, stats: BundleStats) -> None:
 # text: .txd tables + string sniffing
 # ---------------------------------------------------------------------------
 
-def decode_txd(data: bytes) -> List[str]:
-    """Strings of a ``.txd`` menu-text table (``mnu/us/menutext.txd``,
-    ``synopsis.txd``, ``discchg.txd``, ``devchk.txd``). Layout: u32
-    offsets from file start, one per string, the table ending where the
-    first string starts; strings are NUL-terminated, ``\\n`` is literal."""
-    if len(data) < 8:
-        raise ValueError("too short")
-    first, second = struct.unpack_from("<II", data, 0)
-    if 0 < first < 65536 and 4 + first * 4 == second:
-        # count-prefixed variant (menutext.txd): u32 count, then offsets
-        count = first
-        offs = struct.unpack_from(f"<{count}I", data, 4)
-    elif first % 4 == 0 and 4 <= first <= len(data):
-        count = first // 4
-        offs = struct.unpack_from(f"<{count}I", data, 0)
-    else:
-        raise ValueError("not an offset table")
-    out = []
-    for o in offs:
-        if o > len(data):
-            raise ValueError("offset beyond file")
-        end = data.find(b"\x00", o)
-        raw = data[o:end if end >= 0 else len(data)]
-        out.append(_decode_game_text(raw))
-    return out
-
-
-def _decode_game_text(raw: bytes) -> str:
-    """UTF-8 first (the US disc), else Shift-JIS (dev leftovers)."""
-    try:
-        return raw.decode("utf-8")
-    except UnicodeDecodeError:
-        return raw.decode("cp932", "replace")
+def decode_txd(data: bytes, region=None) -> List[str]:
+    """Strings of a ``.txd`` menu-text table (``mnu/xx/menutext.txd``,
+    ``synopsis.txd``, ``discchg.txd``, ``devchk.txd``), parsed by txd.py and
+    read with the build's display codec (USA ``UsCodec``, JP ``JpCodec``;
+    ``region`` None = USA). Raises ValueError (txd.TxdError) when the file is
+    not an offset table."""
+    return [_item_text(it) for it in _items(txd_mod.parse(data, region))]
 
 
 def _sniff_strings(data: bytes, min_len: int = 4) -> Optional[List[str]]:
@@ -395,49 +455,70 @@ def _sniff_strings(data: bytes, min_len: int = 4) -> Optional[List[str]]:
     return out if len(out) >= 2 else None
 
 
-def decode_sb_strings(data: bytes) -> Optional[List[str]]:
-    """The dialogue table of a ``cf/us/*.sb`` scene bank.
+def decode_sb_strings(data: bytes, region=None) -> Optional[List[str]]:
+    """The text pool of an XS3 ``.sb`` scene script (sb.py), one line per
+    string, or None when the file is not an XS3 ``SB`` v1.1 script.
 
-    ``SB  `` header: u16 x2 version, then up to six u32 section offsets at
-    0x0C. Every section is ``{u32 kind, u32 count, u32 offsets[count],
-    payload}``; the one whose payload is NUL-terminated text is the
-    scene's message table — field dialogue and choices ("Board the E.S.?",
-    "Yes\\nNo"), voice-cue ids, and the writers' EUC-JP scene comments
-    (BGM notes, stage directions) that the US disc still carries."""
-    if data[:4] != b"SB  " or len(data) < 0x28:
+    Each string is classified by ``sb.classify``: displayed text and
+    identifiers are read with the USA codec; developers' notes (never drawn)
+    with ``textcodec.NoteCodec``, which picks Shift-JIS, EUC-JP or the USA
+    reading per string, and the line is prefixed ``[note cp932]`` /
+    ``[note euc_jp]`` so the reader knows which reading was used (USA lines
+    left in Japanese: ``[untranslated cp932]``). On a JP build (``region``
+    'jp') every string uses the JP print reading and carries no prefix. Line
+    breaks inside a string come out as ``⟦0A⟧``-style escapes, so a string
+    is always one line."""
+    try:
+        script = sb_mod.parse(data, region)
+    except sb_mod.SbError:
         return None
-    for s in struct.unpack_from("<6I", data, 0x0C):
-        if not s or s + 8 > len(data):
-            continue
-        kind, count = struct.unpack_from("<II", data, s)
-        if kind != 8 or count == 0 or count > 20000 or s + 8 + count * 4 > len(data):
-            continue
-        offs = struct.unpack_from(f"<{count}I", data, s + 8)
-        base = s + 8 + count * 4
-        if any(base + o > len(data) for o in offs):
-            continue
-        out, textual = [], 0
-        for o in offs:
-            end = data.find(b"\x00", base + o)
-            raw = data[base + o:end if end >= 0 else len(data)]
-            try:
-                t = raw.decode("euc_jp")
-            except UnicodeDecodeError:
-                t = raw.decode("cp932", "replace")
-            if raw and all(32 <= b < 127 or b >= 0x80 for b in raw):
-                textual += 1
-            out.append(t)
-        if textual >= max(2, len(out) // 2):
-            return out
-    return None
+    out = []
+    for it in _items(script):
+        text = _item_text(it)
+        if it.role in ("note", "untranslated"):
+            out.append(f"[{it.role} {it.codec}] {text}" if it.codec != "us" else f"[{it.role}] {text}")
+        else:
+            out.append(text)
+    return out
 
 
-def _sniff_string_tables(dump_root: Path, stage_root: Path, stats: BundleStats) -> None:
+def decode_container_strings(gpath: str, data: bytes, region=None) -> Optional[List[str]]:
+    """Lines (``key<TAB>text``) of the parsed text containers other than .sb/.txd:
+    ``mg1\\xx\\Message.Dat`` (msgdat), ``batdat.bin`` (batdat) and the
+    ``mnu\\xx\\*.bin`` menu databases (njbin). None when the file is none of these
+    or does not parse."""
+    low = gpath.lower()
+    name = low.rsplit("\\", 1)[-1]
+    try:
+        if name == "message.dat":
+            import msgdat
+            obj = msgdat.parse(data, region)
+        elif name == "batdat.bin":
+            import batdat
+            obj = batdat.parse(data, region)
+        elif low.startswith("mnu\\") and name.endswith(".bin"):
+            import njbin
+            obj = njbin.parse(data, region)
+        else:
+            return None
+    except (ValueError, IndexError, KeyError):
+        return None
+    lines = [f"{it.key}\t{_item_text(it)}" for it in _items(obj)]
+    return lines or None
+
+
+def _sniff_string_tables(dump_root: Path, stage_root: Path, stats: BundleStats,
+                         region=None) -> None:
     """Export the dialogue / database strings hidden in binary-extension
     files as ``text/<rel>.strings.txt``: ``cf/us/*.sb`` scene banks (the
     in-map dialogue: "Board the E.S.?", shop lines, NPC talk),
     ``mnu/us/*.bin`` databases (character/enemy/item text), ``.dat``
-    tables (``mg1/us/Message.Dat``), ``.shp`` (skipped — item-id bytes)."""
+    tables (``mg1/us/Message.Dat``), ``.shp`` (skipped — item-id bytes).
+    Containers with a parser are read through it (``decode_container_strings``);
+    the ASCII sniff runs only on a USA-codec build."""
+    region = region_mod.as_region(region)
+    jp = region.codec == "jp"
+    jp_only = []
     n = 0
     for p in sorted(dump_root.rglob("*")):
         if not p.is_file() or "_reports" in p.parts or p.suffix.lower() not in _STRING_TABLE_EXTS:
@@ -451,17 +532,31 @@ def _sniff_string_tables(dump_root: Path, stage_root: Path, stats: BundleStats) 
             continue
         if not data:
             continue
-        lines = decode_sb_strings(data) if p.suffix.lower() == ".sb" else None
+        rel = p.relative_to(dump_root)
+        gpath = game_path(rel)
+        lines = decode_sb_strings(data, region) if p.suffix.lower() == ".sb" else None
         if lines is None:
+            lines = decode_container_strings(gpath, data, region)
+        if lines is None and not jp:
             lines = _sniff_strings(data)
         if not lines:
             continue
-        rel = p.relative_to(dump_root)
+        status = sb_mod.scene_status(gpath) if jp else None
+        if status:
+            jp_only.append(gpath)
+            lines = [f"# {status}"] + lines
         dest = stage_root / "text" / rel.parent / (rel.name + ".strings.txt")
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
         n += 1
     stats.text_sniffed = n
+    if jp_only:
+        dest = stage_root / "text" / "JP-ONLY.txt"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(f"# {len(jp_only)} scene scripts with no USA counterpart "
+                        f"({sb_mod.JP_ONLY_STATUS})\n" + "\n".join(sorted(jp_only)) + "\n",
+                        encoding="utf-8")
+        print(f"[browse] text: {len(jp_only)} JP-only scenes listed in text/JP-ONLY.txt", flush=True)
     print(f"[browse] text: {stats.text_txd} .txd tables decoded, "
           f"{n} string tables sniffed out of binary files -> text/", flush=True)
 
@@ -637,6 +732,28 @@ def _package_textures(dump_root: Path, stage_root: Path, stats: BundleStats, job
           f"-> textures_png/_packages/ + package_textures.csv", flush=True)
 
 
+def _models(dump_root: Path, stage_root: Path, stats: BundleStats, jobs: int) -> None:
+    """Browse kind ``models``: models_sweep.browse_models over the dump tree,
+    glb files under ``models/`` plus ``models/models.csv``."""
+    import models_sweep
+    out = stage_root / "models"
+    print(f"[browse] models: converting every .chr/.wpn/.map/.pxy to glTF "
+          f"({max(1, jobs)} processes) ...", flush=True)
+    rows = models_sweep.browse_models(dump_root, out, jobs=max(1, jobs),
+                                      log=lambda m: print(f"[browse] {m}", flush=True))
+    for r in rows:
+        st = r.get("status")
+        if st == "ok":
+            stats.models_ok += 1
+        elif st == "empty":
+            stats.models_empty += 1
+        else:
+            stats.models_err += 1
+            stats.errors.append(f"model {r.get('path')}: {r.get('notes') or st}")
+    print(f"[browse] models: {stats.models_ok} glb, {stats.models_empty} empty "
+          f"pxy slots, {stats.models_err} failures -> models/ + models.csv", flush=True)
+
+
 def bundle(
     dump_root: Path,
     stage_root: Path,
@@ -648,6 +765,7 @@ def bundle(
     sfd_crf: int = 23,
     progress_every: int = 200,
     kinds: Optional[Iterable[str]] = None,
+    region=None,
 ) -> BundleStats:
     """Build a browse/ tree from a dump/ tree.
 
@@ -659,6 +777,8 @@ def bundle(
         jobs: thread count for parallel ffmpeg invocations.
         sfd_preset, sfd_crf: x264 knobs for SFD transcoding.
         kinds: which categories to produce. Default: all of :data:`ALL_KINDS`.
+        region: build profile (region.Region or name) for the text readers;
+            None detects it from the dump (``detect_dump_region``).
     """
     if not dump_root.exists():
         raise FileNotFoundError(f"dump_root not found: {dump_root}")
@@ -679,6 +799,9 @@ def bundle(
         if unknown:
             raise ValueError(f"unknown bundle kinds: {sorted(unknown)}; valid: {ALL_KINDS}")
 
+    region = detect_dump_region(dump_root) if region is None else region_mod.as_region(region)
+    print(f"[browse] build {region.name} (text codec {region.codec}, language folder {region.lang})")
+
     import time as _time
     t0 = _time.monotonic()
     files = _gather(dump_root, kinds_set)
@@ -693,7 +816,8 @@ def bundle(
         done = 0
         with ThreadPoolExecutor(max_workers=jobs) as ex:
             futures = {
-                ex.submit(_convert_one, p, dump_root, stage_root, ffmpeg, sfd_args, kinds_set): p
+                ex.submit(_convert_one, p, dump_root, stage_root, ffmpeg, sfd_args, kinds_set,
+                          region): p
                 for p in files
             }
             for fut in as_completed(futures):
@@ -740,11 +864,13 @@ def bundle(
     if "carved" in kinds_set:
         _carve_jpegs(dump_root, stage_root, stats)
     if "text" in kinds_set:
-        _sniff_string_tables(dump_root, stage_root, stats)
+        _sniff_string_tables(dump_root, stage_root, stats, region)
     if "soundbanks" in kinds_set:
         _sme_soundbanks(dump_root, stage_root, stats)
     if "package_textures" in kinds_set:
         _package_textures(dump_root, stage_root, stats, jobs)
+    if "models" in kinds_set:
+        _models(dump_root, stage_root, stats, jobs)
 
     print(
         f"[browse] done: images={stats.images} text={stats.text} textures={stats.textures} "
@@ -759,6 +885,7 @@ def bundle(
         f"+{stats.package_dups}dup+{stats.package_err}err "
         f"from {stats.package_carriers} carriers "
         f"({stats.package_decompressed} LZSS packages) "
+        f"models={stats.models_ok}+{stats.models_empty}empty+{stats.models_err}err "
         f"in {_time.monotonic() - t0:.0f} s"
     )
     if stats.errors:
@@ -783,4 +910,112 @@ def bundle(
     return stats
 
 
-__all__ = ["BundleStats", "ALL_KINDS", "bundle"]
+__all__ = ["BundleStats", "ALL_KINDS", "bundle", "detect_dump_region", "game_path",
+           "decode_txd", "decode_sb_strings", "decode_container_strings"]
+
+
+# ---------------------------------------------------------------------------
+# self-test
+# ---------------------------------------------------------------------------
+
+def self_test() -> int:
+    """Synthetic checks of the text readers and the kind list; with XS3_D1 set,
+    also decodes menutext.txd and one scene script from the disc."""
+    import struct as _st
+    ok = True
+
+    def check(cond, msg):
+        nonlocal ok
+        print(("ok    " if cond else "FAIL  ") + msg)
+        ok = ok and bool(cond)
+
+    check("models" in ALL_KINDS, "browse kind 'models' is registered")
+    # a counted .txd with a Latin-1 lone byte and a gate pair (A1 DF = ×)
+    strs = [b"M\xf6bius", b"<\xa1\xdf>", b"Line\\nTwo"]
+    hdr = 4 + 4 * len(strs)
+    offs, blob = [], b""
+    for t in strs:
+        offs.append(hdr + len(blob))
+        blob += t + b"\0"
+    data = _st.pack("<I", len(strs)) + _st.pack(f"<{len(strs)}I", *offs) + blob
+    got = decode_txd(data)
+    check(got == ["Möbius", "<×>", "Line\\nTwo"], f"decode_txd reads the USA codec: {got}")
+    # an SB v1.1 script: code, globals, pool, entries, imports, name
+    pool_strs = [b"[Shion]<l2>Board the E.S.?", b"seg_now",
+                 "テストです".encode("cp932") + b"\x81\x40"]
+    pool = sb_mod.build_pool(pool_strs)
+    body = b"\x08\0\0\0\0\0\0\0" * 2   # code + globals sections (empty)
+    pool_off = 0x40 + len(body)
+    after = pool_off + len(pool)
+    tail = b"\x08\0\0\0\0\0\0\0" * 2 + b"\x01\0\0\0us\\test\0\0"
+    secs = [0x40, 0x48, pool_off, after, after + 8, after + 16]
+    sbd = b"SB  " + _st.pack("<HH", 1, 1) + _st.pack("<6I", *secs)
+    sbd += b"\0" * (0x40 - len(sbd)) + body + pool + tail
+    lines = decode_sb_strings(sbd)
+    check(lines is not None and lines[0] == "[Shion]<l2>Board the E.S.?",
+          f"decode_sb_strings dialogue line: {lines and lines[0]!r}")
+    check(lines is not None and lines[1] == "seg_now", "identifier read as ASCII")
+    check(lines is not None and lines[2].startswith("[note cp932] テスト"),
+          f"Shift-JIS note via NoteCodec: {lines and lines[2]!r}")
+    check(decode_sb_strings(b"XX  " + b"\0" * 0x40) is None, "non-SB data -> None")
+
+    # region plumbing on synthetic data
+    check(game_path(Path("chain0/mnu/jp/menutext.txd")) == "mnu\\jp\\menutext.txd"
+          and game_path(Path("iso-disc2/SYSTEM.CNF")) == "SYSTEM.CNF"
+          and game_path(Path("cf/us/1210.sb")) == "cf\\us\\1210.sb", "game_path drops chainN/iso")
+    jp_line = "[シオン]テスト<w30>".encode("euc_jp")
+    jl = decode_sb_strings(sbd.replace(pool, sb_mod.build_pool([jp_line, b"seg_now", b"x"]))
+                           .replace(b"\x01\0\0\0us\\test", b"\x01\0\0\0jp\\test"), "jp")
+    check(jl is not None and jl[0] == "[シオン]テスト<w30>", f"JP .sb read with the JP codec: {jl and jl[0]!r}")
+    jt = decode_txd(_st.pack("<I", 1) + _st.pack("<I", 8) + "オプション".encode("euc_jp") + b"\0", "jp")
+    check(jt == ["オプション"], f"JP .txd read with the JP codec: {jt}")
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "chain0" / "mnu" / "jp").mkdir(parents=True)
+        (root / "chain0" / "mnu" / "jp" / "menutext.txd").write_bytes(b"")
+        check(detect_dump_region(root).name == "jp", "a dump with mnu/jp/menutext.txd detects as jp")
+        (root / "chain0" / "mnu" / "jp" / "menutext.txd").unlink()
+        (root / "chain0" / "mnu" / "us").mkdir()
+        (root / "chain0" / "mnu" / "us" / "menutext.txd").write_bytes(b"")
+        check(detect_dump_region(root).name == "us", "a dump with mnu/us/menutext.txd detects as us")
+
+    jp_iso = os.environ.get("XS3_JP1")
+    if not jp_iso:
+        print("SKIP  JP disc checks (set XS3_JP1)")
+    else:
+        import disc as disc_mod
+        d = disc_mod.Disc(jp_iso)
+        try:
+            mt = decode_txd(d.read("mnu\\jp\\menutext.txd"), "jp")
+            check(len(mt) == 909 and mt[8] == "オプション" and not any("�" in t for t in mt),
+                  f"JP1 menutext.txd: {len(mt)} strings, #8 {mt[8] if len(mt) > 8 else None!r}")
+            sl = decode_sb_strings(d.read("cf\\jp\\1220.sb"), "jp")
+            check(sl is not None and len(sl) > 116 and not any(t.startswith("[note") for t in sl)
+                  and any("\u3040" <= c <= "\u30ff" for t in sl for c in t),
+                  f"JP1 cf\\jp\\1220.sb: {sl and len(sl)} strings, kana, no note prefixes")
+            md = decode_container_strings("mg1\\jp\\Message.Dat", d.read("mg1\\jp\\Message.Dat"), "jp")
+            check(md is not None and len(md) == 871, f"JP1 Message.Dat via msgdat: {md and len(md)} messages")
+            check(sb_mod.scene_status("cf\\jp\\1218.sb") == sb_mod.JP_ONLY_STATUS,
+                  "JP-only scene status is available for the text kind")
+        finally:
+            d.close()
+
+    iso = os.environ.get("XS3_D1")
+    if not iso:
+        print("SKIP  disc checks (set XS3_D1)")
+    else:
+        import disc as disc_mod
+        d = disc_mod.Disc(iso)
+        mt = decode_txd(d.read("mnu\\us\\menutext.txd"))
+        check(len(mt) > 900 and not any("�" in t for t in mt),
+              f"D1 menutext.txd: {len(mt)} strings, no replacement characters")
+        sl = decode_sb_strings(d.read("cf\\us\\1210.sb"))
+        check(sl is not None and any("Möbius" in t for t in sl),
+              "D1 cf\\us\\1210.sb reads 'Möbius'")
+    print("browse_bundle self-test:", "PASS" if ok else "FAIL")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__" and "--self-test" in sys.argv:
+    sys.exit(self_test())

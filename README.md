@@ -3,82 +3,204 @@
 By Jessi Ray Godsibb. Originally bootstrapped with ChatGPT; rebuilt around the
 corrected disc model.
 
-Extracts game assets from the Xenosaga III ISOs using only Python + 7-Zip. No
-legacy EXEs (Xeno23Lbae, xenounpack, XenoLbar, XenoRepack) needed at runtime —
-just the LBA tables those tools produce.
+Unpack, browse and mod **Xenosaga Episode III — Also sprach Zarathustra** (PS2)
+with nothing but Python. Point it at your own disc image and you get every
+file on the disc in a form your computer can open: **models as glTF and
+ready-made `.blend` files for Blender**, textures and pictures as PNG, voices
+and music as WAV, cutscenes as MP4, and game text as UTF-8. It reads the USA
+discs (SLUS_213.89 / SLUS_214.17), **the Japanese discs (SLPS_256.40 /
+256.41)** and the May 2006 press prototype. Then it writes your changes —
+edited text, new letters, a whole new script — into copies of the discs.
+
+The kit ships no game data. **Use your own legally obtained discs only.**
 
 > **Beta — feedback wanted.** Please open issues at
-> <https://github.com/LinuxJessi/Xenosaga3PythonExtractor/issues> with
-> anything that surprises you: extraction errors, GUI quirks, paths that
-> don't auto-detect on your OS, decompiled-format weirdness. The extraction
-> core is well-tested on both discs; the GUI and the texture/audio
-> converters are newer and less battle-hardened. **Use your own legally
-> obtained discs only.**
+> <https://github.com/LinuxJessi/Xenosaga3PythonExtractor/issues>.
+> Reading is tested on all five images. **The write side (text import, new
+> scripts, fonts, pictures, grown files) is tested on disc copies and in
+> previews only: no disc built by this kit has been booted in PCSX2 yet.**
+> Treat your first boot as the real test, and tell us what you see.
+
+![KOS-MOS (mdl\chr\pc\C3kosmos00.chr, USA Disc 1) rendered by Blender from the .blend the kit writes](docs/images/xs3-kosmos-blender.png)
+
+*KOS-MOS as `python cli.py blend` writes her: textures packed, Material
+Preview on, the armature drawn as sticks. Rendered by Blender from the
+saved file.*
+
+| | |
+|---|---|
+| ![Arabic dialogue, wrapped and right-aligned, read back from a patched Disc 1 copy](docs/images/xs3-lang-arabic-dialogue.png) | ![Hindi (Devanagari) in the same font pair, added with --extend](docs/images/xs3-lang-hindi.png) |
+| ![Japanese on the USA disc, kana and kanji donated from the Japanese disc's font](docs/images/xs3-lang-japanese-on-usa.png) | ![Arabic with embedded Latin (HP, EP) and a button tag](docs/images/xs3-lang-arabic-help.png) |
+
+*Arabic, Hindi and Japanese lines read back from patched copies of USA Disc 1
+and drawn with `lang preview` through that copy's own executable rules and
+rebuilt font. These are kit previews, not emulator captures.*
+
+## Feature tour
+
+### The whole party, straight into Blender
+
+![Shion, MOMO, Jr., chaos, Ziggy and Jin (C3*00.chr, USA Disc 1), each rendered by Blender from the .blend `python cli.py blend` writes](docs/images/xs3-party-blender.jpg)
+
+*Shion, MOMO, Jr., chaos, Ziggy and Jin: one `blend --iso D1.iso --path
+'mdl\chr\pc\C3<name>00.chr' --render <name>.png` each, Workbench render,
+nothing touched up. Every `.chr`, `.wpn` and `.map` on all five discs
+converts the same way (1,609 models per disc).*
+
+### Translate it — into any script
+
+* **Export** every line the game shows (scenes, menus, encyclopedia, battle
+  messages, subtitles) as one UTF-8 tree, **edit**, and **import** it back
+  into copies of both discs. An unchanged export rebuilds byte-identical.
+* **New writing systems:** Arabic and Hebrew (right-to-left, bidi checked
+  against ICU), Devanagari and anything else HarfBuzz shapes, drawn from your
+  TrueType font into the game's free font cells.
+* **Japanese on the English game:** kana and kanji donated from the Japanese
+  disc's font, plus an executable unlock.
+* **Text inside pictures:** title cards, HUD word sheets, logos and the
+  battle HUD's bitmap letters export to PNG and go back in.
+* Guides: [TRANSLATING.md](docs/TRANSLATING.md) ·
+  [SCRIPTS.md](docs/SCRIPTS.md) · [FONT.md](docs/FONT.md)
+
+### Japan, USA and the 2006 prototype side by side
+
+The kit tells the builds apart by the boot executable's hash, reads each with
+its own codec and font rules, lists the 140 scenes that exist only in the
+Japanese release, and `align-export` lines the Japanese script up against the
+English one (TSV, JSON or a dual-language SRT).
+
+### Textures in their real colours
+
+![UI sheets before and after the XTX fix: the top half is the old sepia ramp read 16 pixels off, the bottom half the corrected decode with per-picture palettes](docs/screenshots/xtx-palettes-2026-11-20.jpg)
+
+*Top: what every earlier version produced. Bottom: pixels read from the
+right offset and each icon, thumbnail and portrait given its own palette.*
+
+| | |
+|---|---|
+| ![Field map textures](docs/screenshots/improve-field-map.png) | ![Effect textures](docs/screenshots/improve-effects.png) |
+| *LZSS-packed field maps decoded* | *Effect-file textures* |
+
+### Write it back safely
+
+`patch` only writes **copies**: in place when a file fits, appended with
+`--grow` when it doesn't, Disc 1 and Disc 2 kept in step, every file read back
+afterwards, and mixed USA/Japan pairs refused.
+
+## What you get
+
+| | |
+|---|---|
+| Models | all 1,609 models per disc (`.chr` / `.wpn` / `.map` packages and the standalone `.pxy`) as `.glb`: mesh, UVs, textures inside the file, skin weights and a skeleton for the skinned ones (1,014 on each Japanese disc). `blend` turns one into a `.blend` that opens textured, framed and without "bone balls". [docs/BLENDER.md](docs/BLENDER.md), [docs/MODELS.md](docs/MODELS.md) |
+| Japanese discs | detected by the boot executable's hash; 46 executable addresses checked against the code at run time; every Japanese text container reads and rebuilds byte-identically; 140 scenes that exist only in Japanese are listed; `align-export` puts the Japanese and English script side by side (TSV, JSON, dual SRT) |
+| Text | the scene scripts (`.sb`), menu tables (`.txd`), menu databases (`mnu\xx\*.bin`), `Message.Dat`, `batdat.bin`, movie/event subtitles and `.mes` files as one UTF-8 tree. `text-import` checks an edited tree (codec, font ink, sizes) and writes it into copies of Disc 1 + Disc 2. [docs/TRANSLATING.md](docs/TRANSLATING.md) |
+| New scripts | `lang scan / encode / import / preview` draws Arabic, Hebrew, Devanagari or any HarfBuzz-shaped script from a TrueType font into the game's free font cells (123 proportional + 51 wide on USA Disc 1) and encodes the text shaped, wrapped and right-to-left where needed. Japanese on the USA build, with kana and kanji donated from the Japanese font. [docs/SCRIPTS.md](docs/SCRIPTS.md) |
+| Fonts | `font0` / `font1` sheets, metrics and the 8x8 system font out and back in byte-exactly; the rules (pair gate, proportional range) read from each disc's own executable; `font-donor` copies cells between builds; `glyphs-*` finds free slots and renders TTF glyphs. [docs/FONT.md](docs/FONT.md) |
+| Battle HUD letters | `statfont-export / -import`: the HUD's bitmap letters in the window sheets plus their byte and width tables in the executable |
+| Pictures | `image-export / -import`: 1,131 localized pictures on USA Disc 1 (JPEG illustrations, PNG, UI `.xtx` sheets, logo `.tm2`, effect `txy`) to PNG and back at the same size or within the file's sector allocation |
+| Writing back | `patch` writes any set of files into **copies** of one disc or a Disc 1 + Disc 2 pair: in place when a file fits, appended at the image end with `--grow`, with a sector budget, refusals for mixed builds, and a full read-back check. [docs/REPACK.md](docs/REPACK.md) |
+| Browse tree | `browse` builds a folder of things you can open: textures and package textures as PNG, audio and sound banks as WAV, movies as MP4, text as UTF-8 (Japanese read with the Japanese codec), models as `.glb` |
+| Code | the executable and overlays disassembled with string cross-references (`disasm`) |
+
+## Regions
+
+The kit reads the build from the disc's boot executable (`region.py`; `python
+cli.py region --iso X.iso -v` shows the profile and checks every address):
+
+| | USA retail | May 2006 prototype | Japan retail |
+|---|---|---|---|
+| Boot executable | SLUS_213.89 (Disc 1), SLUS_214.17 (Disc 2), same code | SLUS_213.89, different code (sha256 1c3d028a…) | SLPS_256.40 (Disc 1), SLPS_256.41 (Disc 2), same code |
+| Language folder | `\us\` (`cf\us`, `mnu\us`, `mov\us`, `jpg\us` …) | `\us\` | `\jp\`; `jpg\`, `ef\map\`, `ef\esp\` and `mnu\pse\` files sit at the folder root (`resolve` handles both) |
+| Text codec | the executable's whitelist of two-byte pairs; lone `é`, `ö` … are Latin-1 cells | same as USA | EUC-JP: any byte from 0xA0 pairs with the next; no half-width kana, no Latin-1 |
+| Proportional cells | 0x180 (Latin and symbols) | 0x180 | 0xC0 (kana are fixed width) |
+| `Message.Dat` | 933 messages, u32 offsets, strings from 0x2800 | same layout | 871 messages, u16 offsets, strings from 0x800 |
+| Subtitles | `mono` allowed | as USA | no `mono`; `mov\jp\bat` files kept within 1 KiB (the developers' own note) |
+| Scenes | 715 `.sb` per disc | 886 text objects, as many as USA Disc 1 | 856 (140 of them JP-only, load status unknown) |
+| Write tests on copies | `text-import`, `lang import`, `patch` (in place and grown, pair and single) | `patch` same size | `text-import`, `patch` (in place and grown) |
+
+Give Disc 1 and Disc 2 of the same build. The writers refuse a mixed pair
+(USA + Japan, USA + prototype) and an unknown executable.
+
+## Commands
+
+`python cli.py <command> --help` gives the options; the GUI (`python gui.py`,
+or a launcher) has a card for every command, grouped by section.
+
+| Section | Commands |
+|---|---|
+| Disc | `region`, `resolve`, `list`, `dump`, `iso-ls`, `toc-check` |
+| Models | `model`, `models`, `blend`, `glb-info` |
+| Text | `text-export`, `text-import`, `text-roundtrip`, `align-export`; one file at a time: `text-decode`, `sb-strings`, `txd-strings`, `nj-strings`, `subtitle-text`, `msgdat-strings`, `batdat-strings` |
+| New scripts and fonts | `lang scan` / `encode` / `import` / `preview`, `font-extract`, `font-rebuild`, `font-measure`, `font-donor`, `glyphs-slots`, `glyphs-coverage`, `glyphs-render`, `glyphs-apply`, `glyphs-unlock`, `statfont-export`, `statfont-import` |
+| Pictures | `image-export`, `image-import`, `xtx-export`, `xtx-encode`, `chr-decode`, `chr-palettes`, `chr-import-palettes`, `chr-import-entry`, `chr-recolor`, `xc-unpack` |
+| Writing to discs | `patch` (copies, pairs, `--grow`); older in-place single-ISO tools: `repack-info`, `repack-extract`, `repack-patch`, `repack-tree`, `chr-iso-extract`, `chr-iso-patch`, `chr-iso-sweep` |
+| Browse and code | `browse`, `code-extract`, `disasm` |
+| 7-Zip pipeline (USA discs) | `prep`, `lba-from-iso`, `container-map`, `map-regions`, `toc`, `scan`, `extract`, `verify`, `doctor` |
+| Kit | `self-test`, `gui` |
+
+`python cli.py self-test` runs every module's self-test. Set `XS3_D1`,
+`XS3_D2`, `XS3_PROTO`, `XS3_JP1` and `XS3_JP2` to your ISO paths to include
+the disc checks.
+
+## What's new — 2026-11-20
+
+Two passes brought the kit level with the Xenosaga I and II kits. Full
+change log: [docs/UPDATES.md](docs/UPDATES.md); every document:
+[docs/README.md](docs/README.md).
+
+* **Japanese discs.** The Japan retail pair is read like the USA discs: its
+  own language folder, its own text codec (taken from the executable's pair
+  gate), its own font rules, and `Message.Dat`'s shorter layout.
+  `align-export` lines up the Japanese and English script.
+* **Models in Blender in one step.** `blend` writes a `.blend` that opens
+  textured and framed, with the armature as sticks instead of the importer's
+  bone spheres.
+* **Text goes back in.** `text-import` writes an edited tree into copies of
+  both discs at once, refusing anything the disc's codec or font cannot show.
+  `Message.Dat` and `batdat.bin` are now part of the tree.
+* **New scripts.** `lang` ports the Xenosaga I pipeline: HarfBuzz shaping,
+  right-to-left, wrapping, `--extend` for a second script, and Japanese on the
+  USA build.
+* **Pictures and HUD letters** export and import (`image-*`, `xtx-*`,
+  `statfont-*`).
+* **XTX pixels start at 0x50** (after a 32-byte GS upload packet), not 0x30:
+  every decoded `.xtx` was 8 words off. With the fix, the swizzled UI sheets'
+  item icons, location thumbnails and portraits come out in their real
+  colours instead of sepia/grey. Re-run `browse --kinds textures_png`, and
+  re-export before importing anything made from old `*_index.png` files.
+* **A new write layer.** `patch` writes into copies, keeps the two discs'
+  shared index identical, and checks every file afterwards. `repack-*` and
+  `chr-iso-*` now find files through the disc's own index on any build.
+* **A new GUI**, built from the command line itself, grouped by section, that
+  finds your discs and tells USA, Japan and prototype images apart.
+
+Still open: nothing written by the kit has been booted in PCSX2; the loader
+buffer sizes for text objects are unknown (so growth needs `--grow`); the
+`batdat.bin` string fields are structural, not traced in code; `.xap`
+animation and the `.xep` codec are not decoded; the flat UI parts of the
+window0-2 sheets and `titleobj` still have guessed or missing palettes.
+
+### Earlier: the 2026-09-24 improvement run
+
+Package textures (~20,900 PNGs inside `.chr`/`.wpn`/`.map` and effect
+files), the LZSS field maps (`xcpack.py`), 4-bit textures, the text kind and
+the `.sme` sound banks. Details and before/after panels in
+[docs/UPDATES.md](docs/UPDATES.md).
+
+![Extracted save illustrations](docs/screenshots/extracted-mosaic.png)
+
+*1,300+ event illustrations, 348 memory-card save scenes (above), every
+character face texture, every cutscene as MP4, every voiced line as WAV.
+Real extraction; nothing reconstructed or upscaled.*
 
 > **For curious testers:** [`docs/disc-catalog.md`](docs/disc-catalog.md)
 > is the full data dictionary — every file extension across both discs,
 > what it actually is, where the engine reads it from, plus a "Fun finds"
-> section at the bottom (developer names left in the binaries, the locale
-> table for languages that never shipped, KOS-MOS as a literal C struct
-> field, why `credit.bin` isn't actually credits, etc.).
+> section at the bottom.
 
-## What you get
+## Samples
 
-![GUI overview](docs/screenshots/gui-overview.png)
-
-*The local web GUI — ten cards walk you through the full pipeline,
-from "point at an ISO" through "browse decoded textures and movies."*
-
-![Extracted save illustrations](docs/screenshots/extracted-mosaic.png)
-
-*Output: 1,300+ event illustrations, 348 memory-card save scenes
-(above), every character face texture, every cutscene as MP4, every
-voiced line as WAV, and the entire game's compiled MIPS code as a
-disassembly dump. Real extraction; nothing reconstructed or upscaled.*
-
-## What's new — 2026-09-24 improvement run
-
-Five lessons from the sister [Xenosaga I kit](https://github.com/LinuxJessi/Xenosaga1PythonExtractor)
-were re-checked against the XS3 discs, and each one paid off. Full change
-log with what to re-run: [docs/UPDATES.md](docs/UPDATES.md).
-
-- **~20,900 textures were hiding inside other files.** Every character,
-  weapon, field-map and effect texture lives in a `txy` block inside
-  `.chr`/`.wpn`/`.map` packages and `.esd`/`.esp`/`.sme` effect files.
-  `browse --kinds package_textures` decodes all of it to PNG with a CSV
-  manifest.
-- **The field maps are compressed after all** (98 of 168 on Disc 1). The
-  engine's four LZSS decoders were read out of the SLUS decompile and
-  ported (`xcpack.py`, `xc-unpack` command); compressed maps now decode
-  like any other package.
-- **4-bit textures decode** (a quarter of all package entries used to come
-  out as noise), and two texture-table bugs were fixed (strip count, the
-  second upload bank of field maps).
-- **Hidden text recovered.** `.txd` files are the menu text (907 strings),
-  `.sb` "sound banks" are the scene scripts with the in-map dialogue, and
-  the `mnu/us/*.bin` databases are the in-game encyclopedia. All exported
-  by the `text` kind.
-- **Sound banks inside `.sme`** bundles (per-character battle voice/SE)
-  are decoded by the `soundbanks` kind.
-- **UI sheets** (window0-2, itemcap …) now have readable shapes and fonts
-  instead of dither noise, but their **colours are still wrong (sepia /
-  grey)** — a known limitation, fix planned for a future release.
-- A default-run bug where `textures_png` never ran alongside `textures`
-  is fixed.
-
-![Field-map textures](docs/screenshots/improve-field-map.png)
-
-*315 textures out of one LZSS-compressed town map that was undecodable
-before tonight.*
-
-![Before/after: 4-bit entries and the two-bank fix](docs/screenshots/improve-psmt4-banks.png)
-
-*Left: a battle backdrop as the old decoder saw it; right: the same 4-bit
-entry decoded. Below: field-map entries that were blank until the second
-texture bank was overlaid. More panels (effect sprites, UI sheets) in
-`docs/UPDATES.md`.*
-
-### Sample dialogue
+### Dialogue
 
 From `cf/us/2940.sb`, a Miltia field scene, exactly as the `text` kind
 writes it (`<lN>` = portrait/line slot, `<wNN>` = wait in frames):
@@ -104,7 +226,7 @@ An elderly resident of the <Dabrye Mine> on Miltia. Originally\na labor
 immigrant from another star system after Miltia\nbecame a republic …
 ```
 
-### Sample audio
+### Audio
 
 Short previews decoded by the kit from Disc 1 (25-second BGM excerpts,
 full-length voice/SE cues). Click to play or download.
@@ -148,9 +270,10 @@ double-click.
    below.
 
 That's it. Your browser opens to the GUI; the Environment panel should
-show green ticks for 7-Zip, ffmpeg, Pillow, and capstone (all bundled).
-The optional `pip install` and the separate ffmpeg / 7-Zip installs in
-the manual section below are **not** needed for the pre-built.
+show the five required Python packages (numpy, Pillow, capstone, fonttools,
+uharfbuzz) and ffmpeg / 7-Zip in green (all bundled). The Python and
+`pip install` steps in the manual section below are **not** needed for the
+pre-built.
 
 #### Why Windows warns the first time
 
@@ -183,73 +306,72 @@ run from source.
 
 ### Windows — manual install
 
-1. Install **Python 3.8 or newer** from <https://www.python.org/downloads/>.
+1. Install **Python 3.9 or newer** from <https://www.python.org/downloads/>.
    **Tick "Add Python to PATH"** on the first installer screen — this is the
    single most common cause of "it won't launch" reports.
-2. Install **7-Zip** from <https://www.7-zip.org/>. The default install
-   location (`C:\Program Files\7-Zip\`) is auto-detected — no PATH tweaks
-   needed.
-3. *(Optional, only if you want SFD→MP4 video and ADX→WAV audio)* Install
-   **ffmpeg**. Easiest: <https://www.gyan.dev/ffmpeg/builds/> → "release
-   essentials" zip. Drop it under `C:\ffmpeg\` so the binary lives at
-   `C:\ffmpeg\bin\ffmpeg.exe` (auto-detected). Or `winget install
-   Gyan.FFmpeg` (also auto-detected).
-4. *(Optional, only if you want texture-image and disassembly features)* Open
-   PowerShell or Command Prompt **in the extractor folder** and run:
-   ```
-   pip install -r requirements.txt
-   ```
-5. **Double-click `launch.bat`.** A console window opens, prints the URL it
-   bound to, and your default browser opens to it. Leave the console window
-   open while you use the GUI — closing it shuts the server down.
+2. **Double-click `launch.bat`.** The first run checks for the kit's five
+   required Python packages (numpy, Pillow, capstone, fonttools, uharfbuzz);
+   if your Python lacks any of them it makes a private environment in
+   `.venv\` beside the launcher and installs `requirements.txt` there.
+   Later runs reuse `.venv\`. Then it prints the URL it bound to and opens
+   your browser. Leave the console window open while you use the GUI —
+   closing it shuts the server down.
+3. *(For `browse` audio and movies)* install **ffmpeg**. Easiest:
+   <https://www.gyan.dev/ffmpeg/builds/> → "release essentials" zip, unpacked
+   so the binary lives at `C:\ffmpeg\bin\ffmpeg.exe`, or `winget install
+   Gyan.FFmpeg` (both auto-detected).
+4. *(For the older `prep` pipeline only)* install **7-Zip** from
+   <https://www.7-zip.org/>. The direct-from-ISO commands (`list`, `dump`,
+   `model`, `text-export`, ...) do not need it.
+5. *(Optional, for models)* install **Blender** from <https://www.blender.org/>;
+   the GUI finds it in its default location. The `.glb` files open in any
+   glTF viewer without it (see `docs/BLENDER.md`).
 
 ### macOS
 
 1. Install **Python 3** if you don't have it (`brew install python` or from
    python.org).
-2. Install **7-Zip** (`brew install p7zip`) and optionally **ffmpeg**
-   (`brew install ffmpeg`).
-3. *(Optional)* `pip3 install -r requirements.txt` for textures + disasm.
-4. **First-time setup**: open Terminal in the extractor folder and run
+2. Optionally `brew install ffmpeg` (browse audio/movies), `brew install
+   p7zip` (`prep` only) and Blender (`brew install --cask blender`).
+3. **First-time setup**: open Terminal in the extractor folder and run
    `chmod +x launch.command` (one-time — Finder won't let you double-click
    it otherwise).
-5. **Double-click `launch.command`.** Terminal opens, prints the URL, and
-   your browser opens to it.
+4. **Double-click `launch.command`.** Like `launch.bat`, the first run
+   installs the five required packages into `.venv/` if the Python it finds
+   lacks any of them, then Terminal prints the URL and your browser opens.
 
 ### Linux
 
-1. `sudo apt install python3 p7zip-full ffmpeg` (or your distro's equivalent).
-2. *(Optional)* `pip3 install -r requirements.txt`.
-3. **First-time setup**: `chmod +x launch.sh` in a terminal.
-4. **Double-click `launch.sh`** in your file manager (set to "Run" if it
-   asks), or just run `./launch.sh` in a terminal.
+1. `sudo apt install python3 python3-venv ffmpeg p7zip-full` (or your
+   distro's equivalent; `python3-venv` lets the launcher create `.venv/`).
+2. **First-time setup**: `chmod +x launch.sh` in a terminal.
+3. **Double-click `launch.sh`** in your file manager (set to "Run" if it
+   asks), or run `./launch.sh` in a terminal. The first run installs the
+   requirements into `.venv/` when needed, as on the other systems.
 
 ### What you see in the GUI
 
-A right-side **Environment** panel shows whether 7-Zip, ffmpeg, Pillow, and
-capstone were found. Green = good. Red = install that thing if you want the
-feature it powers (you can run the basic extraction without ffmpeg / Pillow /
-capstone; they're each needed only for specific steps).
+A right-side **Environment** panel shows Python, the CLI, the five required
+packages with their versions (red = missing: run the launcher again, or
+`python -m pip install -r requirements.txt`), ffmpeg, Blender and 7-Zip, and
+every Episode III disc it found near the kit, grouped by build: the USA pair,
+the Japanese pair and the May 2006 prototype (each confirmed from the image's
+own serial and executable hash, see `region.py`). When more than one build is
+found, **Fill disc fields with** picks which one pre-fills the disc fields.
+Commands that rewrite an image in place never get a detected original
+pre-filled — give them a copy.
 
-The main area is **ten cards in order**. Click a card header to expand it.
-Run them top-to-bottom the first time. Every card has a **"Show command"
-button** that previews what would run without executing — useful for
-debugging.
+The main area is one **card per CLI command**, grouped into sections: Disc,
+Browse, Models, Text & translation, Fonts & scripts, Modding, Diagnostics
+(and Other for anything new the map does not name). The cards are generated
+from `cli.py`'s own argument parser when the GUI starts, so every option of
+every command is there, and a command added to the kit later appears with no
+GUI change. Click a card header to expand it. Every card has a **"Show
+command"** button that previews the exact `cli.py` command line without
+running it; output of a real run streams live into the Output panel.
 
-Per disc:
-1. **Check setup** — quick smoke test, shows what's in the work dir.
-2. **Extract X3.\* from ISO** — pulls the seven bigfiles out. ~3 min.
-3. **Assign LBA → containers** — wires which LBA file describes which
-   bigfile chain. Pre-filled with Disc 1 defaults; flip to
-   `Lba2.txt=X3.21,X3.22,X3.23` + ignore `X3.00 X3.20` for Disc 2.
-4. **TOC summary** — sanity-check the LBA tables.
-5. **Build extraction manifest** — resolves every row to a `(file,
-   offset)`. Fast.
-6. **Extract assets** — slices ~13,500 files out per disc. ~10 s.
-7. **Verify** — checks sizes (+ optional SHA-1) against the manifest.
-8. **Extract code** — pulls SLUS executable, OVL overlays, IOP modules.
-9. **Build browse tree** — converts to viewable / playable formats. ~30 s.
-10. **Disassemble code** — MIPS R5900 disasm + string xrefs.
+A good first run: **region** (which build each disc is), then **dump** or
+**list**, then **browse** / **models** / **text-export**.
 
 ### Stopping the GUI
 
@@ -288,47 +410,46 @@ under `\evt`, `\mov` and `\snd` came out as garbage.
 
 ## Requirements
 
-- **Python** 3.8+ (Windows / macOS / Linux / WSL)
-- **7-Zip** (`prep` and `code-extract`). On Windows install 7-Zip; on
-  macOS/Linux install `p7zip-full`. Pass `--sevenzip /path/to/7z.exe` if it
-  isn't on `PATH`.
-- **ffmpeg** (only for `browse` kinds `audio` / `movies`; the `soundbanks`
-  kind decodes `.dap` banks in pure Python). Static builds work
-  fine; pass `--ffmpeg /path/to/ffmpeg` if it isn't on `PATH`.
-- Optional Python deps (`pip install -r requirements.txt`):
-  - **Pillow** — needed for `browse --kinds textures_png` (XTX/TM2 → PNG).
-  - **capstone** — needed for `disasm` (MIPS R5900 disassembly + string xrefs).
+- **Python** 3.9+ (Windows / macOS / Linux / WSL)
+- **Python packages — all required** (`requirements.txt`): numpy, Pillow,
+  capstone, fonttools, uharfbuzz. The launchers install them into `.venv/`
+  on first run when your Python lacks any of them; from a terminal:
 
-  The core extraction pipeline (`prep` / `scan` / `extract` / `verify` /
-  `map-regions` / `toc` / `doctor`) has **no** Python dependencies — only
-  7-Zip on PATH.
+  ```bash
+  python -m pip install -r requirements.txt
+  ```
+
+  No command falls back to a worse path when one is missing:
+  `python cli.py self-test` fails, and `cli.py` refuses to run other commands
+  while a module cannot be imported.
+- **ffmpeg** — `browse` audio (`.adx`) and movies (`.sfd`). Static builds
+  work fine; pass `--ffmpeg /path/to/ffmpeg` if it isn't on `PATH`.
+- **7-Zip** — only the older `prep` / `code-extract` pipeline. On Windows
+  install 7-Zip; on macOS/Linux `p7zip`. Pass `--sevenzip /path/to/7z` if it
+  isn't on `PATH`.
+- **Blender** (optional) — for opening the `.glb` models; see
+  `docs/BLENDER.md`.
 
 ## GUI (double-click to launch)
 
-Don't want to type commands? Double-click the launcher for your OS:
-
 | OS | File | Notes |
 |---|---|---|
-| Windows | `launch.bat` | Uses the Windows `py` launcher or `python` on PATH. |
-| macOS | `launch.command` | First run: `chmod +x launch.command`. Opens in Terminal. |
-| Linux | `launch.sh` | First run: `chmod +x launch.sh`. |
+| Windows | `launch.bat` | Uses the `py` launcher or `python` on PATH; creates `.venv\` on first run if needed. |
+| macOS | `launch.command` | First run: `chmod +x launch.command`. Opens in Terminal; creates `.venv/` if needed. |
+| Linux | `launch.sh` | First run: `chmod +x launch.sh`. Creates `.venv/` if needed. |
 
-The launcher starts a local web server on a free port and opens your browser.
-The GUI is a dashboard of cards — one per pipeline step (doctor / prep /
-map-regions / toc / scan / extract / verify / code-extract / browse /
-disasm), each with the same form fields the CLI takes. Subprocess output
-streams live into a side panel via Server-Sent Events. The auto-detect tab
-on the right also tells you whether `ffmpeg`, `7-Zip`, `Pillow`, and
-`capstone` are present.
+The launcher makes sure the requirements are installed, starts a local web
+server on a free port and opens your browser. Plain HTTP, bound only to
+`127.0.0.1`, and requests from other web sites are refused — nothing reaches
+the network.
 
-Plain HTTP, bound only to `127.0.0.1` — nothing reaches the network.
-
-You can also run it directly:
+You can also run it directly (with the requirements installed):
 
 ```bash
-python gui.py            # opens default browser
-python gui.py --no-browser
-PORT=8080 python gui.py  # pin the port
+python gui.py              # opens default browser
+python gui.py --no-browser # just print the URL
+PORT=8080 python gui.py    # pin the port
+python gui.py --self-test  # check the cards, the disc detection and the deps
 ```
 
 ## Workflow (command line)
@@ -370,8 +491,9 @@ python cli.py verify --work . --out ./dump --limit 500 --hash
 python cli.py code-extract --iso "...Disc 1).iso" --out ./browse/code
 
 # 9. (Optional) build a sibling browse/ tree of viewable / playable files.
-#    Needs ffmpeg on PATH (for audio/movies) and `pip install Pillow` (for
-#    textures_png). --stage is a fast scratch dir; --out is the final
+#    Needs ffmpeg on PATH (for audio/movies); Pillow and numpy come with
+#    the requirements. Also works on a `dump` folder of any build (the
+#    text readers follow the build; --region overrides). --stage is a fast scratch dir; --out is the final
 #    destination (omit to keep outputs in --stage). `--kinds` filters
 #    which categories to produce; default is all.
 python cli.py browse \
@@ -382,7 +504,7 @@ python cli.py browse \
     --kinds images,text,textures,textures_png,audio,movies,carved
 
 # 10. (Optional) MIPS R5900 disassembly + lui/addiu string xrefs for SLUS
-#     and the three OVL overlays. Needs `pip install capstone`.
+#     and the three OVL overlays (capstone, in the requirements).
 python cli.py disasm --code-dir ./browse/code
 ```
 
@@ -401,7 +523,9 @@ Disc 2 is the same flow with a fresh `--work` directory, using `Lba0.txt` +
 - `dump/_reports/extract.log` — per-row log line (`OK`, `SKIP`, `ERR`).
 - `dump/_reports/hashes.sha1` — SHA-1 of every written file (when `--hash`).
 
-## Subcommands
+## Subcommands (the 7-Zip pipeline and the older tools)
+
+The direct-from-ISO commands are listed under [Commands](#commands) above.
 
 | Command         | What it does |
 |-----------------|--------------|
@@ -414,18 +538,21 @@ Disc 2 is the same flow with a fresh `--work` directory, using `Lba0.txt` +
 | `scan`          | Walks every LBA row, resolves to `(container, local_offset)`, writes manifest. |
 | `extract`       | Slice bytes per the manifest into a mirrored tree. |
 | `verify`        | Cross-check extracted file sizes (and optionally SHA-1) against the manifest. |
-| `browse`        | Build a sibling `browse/` tree. Categories (`--kinds`): `images` (JPG copy), `text` (TXT/MES/T copy, `.txd` menu-text tables decoded, dialogue/database strings sniffed out of `.sb`/`.bin`/`.dat` as `*.strings.txt`), `textures` (XTX/TM2/TXY/BMP/PNG raw copy), `textures_png` (XTX/TM2 → PNG decode, Pillow needed), `package_textures` (every texture inside `.chr`/`.wpn`/`.map` packages and `.esd`/`.esp`/`.sme` effect files → PNG + `package_textures.csv`, pure Python), `audio` (ADX → WAV, ffmpeg), `soundbanks` (DAP → per-cue WAV, incl. the banks inside `.sme`), `movies` (SFD → H.264 MP4, ffmpeg), `carved` (JPGs carved from `credit.bin`-style containers). |
+| `browse`        | Build a sibling `browse/` tree. Categories (`--kinds`): `images` (JPG copy), `text` (TXT/MES/T copy plus a UTF-8 `*.utf8.txt` reading of subtitles and `.mes`, `.txd` menu-text tables decoded, `.sb` scene scripts, `mnu\xx\*.bin` databases, `Message.Dat` and `batdat.bin` parsed to `*.strings.txt` with the build's codec; on a Japanese dump the JP-only scenes are listed in `text/JP-ONLY.txt`), `textures` (XTX/TM2/TXY/BMP/PNG raw copy), `textures_png` (XTX/TM2 → PNG decode, Pillow needed), `package_textures` (every texture inside `.chr`/`.wpn`/`.map` packages and `.esd`/`.esp`/`.sme` effect files → PNG + `package_textures.csv`, pure Python), `audio` (ADX → WAV, ffmpeg), `soundbanks` (DAP → per-cue WAV, incl. the banks inside `.sme`), `movies` (SFD → H.264 MP4, ffmpeg), `carved` (JPGs carved from `credit.bin`-style containers), `models` (every model as `.glb` + `models.csv`). `--region auto\|us\|proto_2006_05\|jp` picks the text readers (auto: the dump's boot executable, else its language folder). |
 | `code-extract`  | Run 7-Zip over the ISO to pull the non-X3 files (SLUS, OVL, IRX, SYSTEM.CNF) into a directory. |
 | `disasm`        | MIPS R5900 disassembly + `lui`/`addiu` string xrefs for SLUS / OVL ELFs. Needs `capstone`. |
 
-### Depack / repack (any file, both discs)
+### Depack / repack (any file, any build, one ISO in place)
+
+These write a single ISO in place. For copies, Disc 1 + Disc 2 pairs and files
+that grow, use `patch`.
 
 | Command          | What it does |
 |------------------|--------------|
-| `repack-info`    | Resolve an in-game path: table, container, absolute ISO offset, sector-allocation slack. |
-| `repack-extract` | Pull any one file out of an ISO via the Lba tables (all three tables, both discs). |
-| `repack-patch`   | Write a file back into an ISO in place, read-back verified. Same-size by default; `--pad` allows resizes up to the slot's sector allocation. |
-| `repack-tree`    | Patch an entire mod directory that mirrors the game tree (`mymod/mdl/chr/...` → `\mdl\chr\...`). `--dry-run` previews. GUI card 14. |
+| `repack-info`    | Resolve an in-game path through the disc's own index: chain, container, absolute ISO offset, sector-allocation slack, files sharing its sectors. |
+| `repack-extract` | Pull any one file out of an ISO (all three chains, any build). |
+| `repack-patch`   | Write a file back into an ISO in place, read-back verified. Same-size by default; `--pad` allows resizes up to the slot's sector allocation and updates the index size. |
+| `repack-tree`    | Patch an entire mod directory that mirrors the game tree (`mymod/mdl/chr/...` → `\mdl\chr\...`). `--dry-run` previews. |
 | `xc-unpack`      | Inspect an `Xc` MR package (`.chr`/`.map`/`.wpn`/`.sme`): version, sub-resources; `--out` writes it decompressed (the field maps are LZSS-packed on disc — see `xcpack.py`). |
 
 Full loop and the disc model's rules: [docs/REPACK.md](docs/REPACK.md).
@@ -440,9 +567,9 @@ Underlying module works standalone too: [`repack.py`](repack.py).
 | `chr-import-palettes` | Write edited swatch PNGs back into a `.chr` (lossless round-trip for untouched entries). |
 | `chr-import-entry` | Repaint a texture from a same-size PNG, quantized to its existing palette (experimental). |
 | `chr-recolor`   | Hair recolor of one `.chr` — `--mode blue` (KOS-MOS-style color filter) or `--mode warm` (Shion-style name policy), `--hue 0..1`. |
-| `chr-iso-extract` | Pull one file out of an ISO by its disc path, via the Lba tables. |
+| `chr-iso-extract` | Pull one file out of an ISO by its disc path (the disc's own index). |
 | `chr-iso-patch` | Write a same-size file back into an ISO, read-back verified. |
-| `chr-iso-sweep` | Recolor every matching `.chr` in an ISO in place (work on a copy!). Same offsets on Disc 1 and Disc 2. |
+| `chr-iso-sweep` | Recolor every matching `.chr` in an ISO in place (work on a copy!), across all chains. |
 
 The GUI has cards for the common path (decode → export palettes → import →
 sweep). Guide with the full workflow incl. image-editor palette editing:
@@ -486,8 +613,9 @@ need to pass them manually.
 
 ## FAQ
 
-**Does this modify the ISOs?** No, it only reads them; everything else is
-written under `--work` and `--out`.
+**Does this modify the ISOs?** Reading never does. `patch` writes into
+copies; only the older `repack-*` / `chr-iso-*` commands edit an image in
+place, so give them a copy.
 
 **Can I run scan/extract again after editing the manifest?** Yes —
 `scan` is idempotent. `extract` overwrites destination files.

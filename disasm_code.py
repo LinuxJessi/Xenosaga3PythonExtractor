@@ -22,6 +22,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+# capstone is a kit requirement (requirements.txt; bundled in the app, installed
+# by the launchers), imported at module load so a missing install fails loudly.
+from capstone import Cs, CS_ARCH_MIPS, CS_MODE_MIPS64, CS_MODE_LITTLE_ENDIAN
+
 
 class DisasmError(Exception):
     """Raised when disassembly cannot proceed (missing capstone, bad ELF, …)."""
@@ -86,11 +90,6 @@ def _vaddr_of_file(elf: ElfInfo, file_off: int) -> Optional[int]:
 
 def write_disassembly(elf_path: Path, out_path: Path) -> int:
     """Write the full disassembly. Returns the number of instructions written."""
-    try:
-        from capstone import Cs, CS_ARCH_MIPS, CS_MODE_MIPS64, CS_MODE_LITTLE_ENDIAN
-    except ImportError as exc:
-        raise DisasmError("capstone is not installed; pip install capstone") from exc
-
     data = elf_path.read_bytes()
     elf = parse_elf(data)
     text = elf.text_segments()

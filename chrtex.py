@@ -21,12 +21,14 @@ Commands (see docs/MODDING-CHARACTERS.md for the walkthrough):
   import-entry <chr> <name> <png> <out> repaint a texture (quantized, exp.)
   pink-kosmos <chr> <out> [hue]         worked example: blue-band recolor
   pink-shion <chr> <out> [hue]          worked example: warm-band + policy
-  iso-extract <iso> <discpath> <out>    pull a file via the Lba tables
+  iso-extract <iso> <discpath> <out>    pull a file via the disc's own index
   iso-patch <iso> <discpath> <file>     write it back (size-checked+verified)
   iso-sweep <iso> kosmos|shion [hue]    recolor every matching .chr in an ISO
 
-`<discpath>` is the in-game path as it appears in lba/Lba0.txt, e.g.
-`\\mdl\\chr\\pc\\C3kosmos00.chr` (quote it in the shell).
+`<discpath>` is the in-game path as the disc's X3.00/X3.10/X3.20 index spells
+it, e.g. `\\mdl\\chr\\pc\\C3kosmos00.chr` (quote it in the shell; / works,
+case-insensitive). Works on USA, the May 2006 prototype and Japanese images.
+Different-size writes and Disc 1 + Disc 2 pairs: `cli.py patch` (patch.py).
 """
 import colorsys
 import struct
@@ -140,11 +142,14 @@ def parse_chr(data):
 
 def parse_txy(data, sub_off, _sub_size):
     """Parse a txy resource. Returns the primary texture bank's table
-    (canvas width, strips, entries) plus ``banks``: further bank tables of
-    a version-2 txy. Field maps upload their textures in two VRAM passes
-    that share one entry table — the entries a bank does not carry come
-    out fully transparent from that bank's canvas — so ``decode_entries``
-    picks, per entry, the bank that actually holds its pixels."""
+    (canvas width, strips, entries) plus ``banks``: the further bank
+    tables of a multi-bank txy (field maps 2-8 banks, header word +0x04 =
+    bank count, table offsets at +0x10[count]; layout as documented in
+    Xenosaga2PythonExtractor/txy.py, the same engine). Every bank carries
+    the same entry table and only the strips differ; each entry's +0x30
+    word (``bank``) names the bank its pixels come from, and
+    ``decode_entries`` decodes it against GS memory after banks 0..bank
+    are uploaded in order (the XS2 txy.py rule)."""
     txy = sub_off + 0x40                       # 0x40-byte pre-header
     if data[txy:txy + 4] != b"txy\x00":
         raise ChrError("txy magic missing")
@@ -153,13 +158,25 @@ def parse_txy(data, sub_off, _sub_size):
         raise ChrError("empty txy (no strip table)")
     t = _parse_bank(data, txy, tbl_off)
     t["banks"] = []
-    for k in range(3):                         # extra bank table pointers
-        extra, = struct.unpack_from("<I", data, txy + 0x14 + k * 4)
+    nbanks, = struct.unpack_from("<I", data, txy + 0x04)
+    if not 1 <= nbanks <= 32:                  # older reading: 3 extra slots
+        nbanks = 4
+    for k in range(1, nbanks):                 # extra bank table pointers
+        if txy + 0x10 + k * 4 + 4 > len(data):
+            break
+        extra, = struct.unpack_from("<I", data, txy + 0x10 + k * 4)
         if extra and txy + extra + 0x40 <= len(data):
             try:
-                t["banks"].append(_parse_bank(data, txy, extra))
+                b = _parse_bank(data, txy, extra)
             except ChrError:
-                pass
+                b = None
+        else:
+            b = None
+        # an unreadable bank stays as a None slot so entry bank numbers
+        # keep pointing at the right table
+        t["banks"].append(b)
+    while t["banks"] and t["banks"][-1] is None:
+        t["banks"].pop()
     return t
 
 
@@ -189,9 +206,13 @@ def _parse_bank(data, txy, tbl_off):
     for i in range(n_entries):
         b = base + i * 0x60
         gsaddr, fmt, w, h, x, y, cbp, flag, palx, paly = struct.unpack_from("<10I", data, b)
+        bank, = struct.unpack_from("<i", data, b + 0x30)
         name = data[b + 0x40:b + 0x60].split(b"\x00")[0].decode("latin1")
+        # gsaddr (+0x00) is what a .pxy material's TEX0.TBP0 - 0x3800 names;
+        # bank (+0x30) the bank holding the pixels (-1 on some entries)
         entries.append({"i": i, "name": name, "fmt": fmt, "w": w, "h": h,
-                        "x": x, "y": y, "cbp": cbp, "palx": palx, "paly": paly})
+                        "x": x, "y": y, "cbp": cbp, "palx": palx, "paly": paly,
+                        "gsaddr": gsaddr, "bank": bank})
     return {"txy": txy, "canvas_w": canvas_w, "strips": strips, "entries": entries}
 
 
@@ -200,19 +221,29 @@ def strip_origin(t, s):
     return (page % (t["canvas_w"] // 64)) * 64, (page // (t["canvas_w"] // 64)) * 32
 
 
-def compose_canvas(data, t):
-    """GS local memory as the engine leaves it after uploading this txy:
-    the primary bank's strips, then every extra bank's strips pasted over
-    them in order (field maps upload two banks back to back; the second
-    is narrower in its lower pages, so the first bank's pixels survive
-    there — decoding against the primary bank alone left a third of a
-    town's entries blank, against the overlay none)."""
+def _bank_list(t):
+    """[primary, extra banks...] by bank number; a slot that could not be
+    parsed, or whose canvas width differs from the primary's, is None."""
     W = t["canvas_w"]
-    banks = [t] + [b for b in t.get("banks", []) if b["canvas_w"] == W]
-    H = max(strip_origin(b, s)[1] + s["h"] for b in banks for s in b["strips"])
+    return [t] + [b if b is not None and b["canvas_w"] == W else None
+                  for b in t.get("banks", [])]
+
+
+def compose_canvas(data, t, upto=None):
+    """GS local memory as a CT32 canvas after banks 0..``upto`` of this txy
+    are uploaded in order (``upto=None``: every bank, the state after the
+    whole file). A later bank's strips overwrite an earlier one's, so an
+    entry has to be decoded against the canvas of its own bank
+    (``decode_entries`` does that): against the all-banks overlay, 632
+    E3_UMD07/O_TST/... entries of bank 0 on Disc 1 came out all zero."""
+    W = t["canvas_w"]
+    banks = _bank_list(t)
+    H = max(strip_origin(b, s)[1] + s["h"] for b in banks if b for s in b["strips"])
     t["canvas_h"] = H
     canvas = bytearray(W * H * 4)
-    for b in banks:
+    for b in banks[:None if upto is None else upto + 1]:
+        if b is None:
+            continue
         for s in b["strips"]:
             x0, y0 = strip_origin(b, s)
             src = b["txy"] + s["off"] + 0x20
@@ -220,6 +251,14 @@ def compose_canvas(data, t):
                 d = ((y0 + y) * W + x0) * 4
                 canvas[d:d + s["w"] * 4] = data[src + y * s["w"] * 4:src + (y + 1) * s["w"] * 4]
     return canvas
+
+
+def entry_bank(t, e):
+    """Bank index an entry decodes from: its +0x30 word, or the last bank
+    when that word is out of range (-1)."""
+    n = len(_bank_list(t))
+    b = e.get("bank", n - 1)
+    return b if 0 <= b < n else n - 1
 
 
 def canvas_file_offset(t, x, y):
@@ -406,50 +445,91 @@ def _opaque_fraction(rgba):
     return sum(1 for i in range(3, len(rgba), 4) if rgba[i]) / n if n else 0.0
 
 
+def _decode_one(t, e, canvas, idx8):
+    """rgba bytes of entry ``e`` against one canvas (``idx8``: its unswizzled
+    8bpp atlas, needed for PSMT8 only)."""
+    cw = t["canvas_w"]
+    w, h, x0, y0 = e["w"], e["h"], e["x"], e["y"]
+    rgba = bytearray(w * h * 4)
+    if e["fmt"] == PSMT8:
+        pal = [bytes(p) for p in clut_at(canvas, cw, e["palx"], e["paly"])]
+        aw = cw * 2
+        for y in range(h):
+            irow = (y0 + y) * aw + x0
+            if irow + w > len(idx8):
+                break
+            orow = y * w * 4
+            for x in range(w):
+                rgba[orow + x * 4:orow + x * 4 + 4] = pal[idx8[irow + x]]
+    elif e["fmt"] == PSMT4:
+        pal = [bytes(p) for p in clut16_at(canvas, cw, e["palx"], e["paly"])]
+        nib = read_psmt4_rect(canvas, cw, x0, y0, w, h)
+        for i, v in enumerate(nib):
+            rgba[i * 4:i * 4 + 4] = pal[v]
+    else:                                       # fmt 0: raw CT32 region
+        for y in range(h):
+            s = ((y0 + y) * cw + x0) * 4
+            row = canvas[s:s + w * 4]
+            orow = y * w * 4
+            for x in range(min(w, len(row) // 4)):
+                r, g, b, a = row[x * 4:x * 4 + 4]
+                rgba[orow + x * 4:orow + x * 4 + 4] = bytes((r, g, b, min(a * 2, 255)))
+    return bytes(rgba)
+
+
 def decode_entries(data, t, canvas=None, idx8=None):
     """Yield ``(entry, w, h, rgba_bytes)`` for every entry of a parsed txy.
 
     fmt 0x13 (PSMT8): 256-colour CLUT tile at (palx, paly), indices from
     the unswizzled 8bpp atlas. fmt 0x14 (PSMT4): 16-colour 8x2 tile,
     indices read straight from the canvas per pixel. fmt 0: the entry
-    rect is raw CT32 in canvas coordinates. ``canvas`` / ``idx8`` may be
-    passed in when the caller already composed them (``compose_canvas``
-    already overlays the extra banks of a two-pass field map)."""
+    rect is raw CT32 in canvas coordinates.
+
+    Multi-bank txy: each entry is decoded against the canvas of its own
+    bank (``entry_bank``: banks 0..bank uploaded in order). When that comes
+    out all zero (no pixel, no alpha), the other bank states are tried in
+    order and the first that gives pixels is used. Measured on Disc 1's
+    265 multi-bank packages (34,980 entries): the bank word alone leaves
+    140 entries of bank -1 (wave_plus.* in E3_ZDA01) and 22 of bank 0
+    (sotowa3/4 in E3_UMD06) empty that bank 0 resp. bank 1 fill; the old
+    all-banks overlay left 630 empty. ``canvas`` / ``idx8`` may be passed in
+    to force one canvas for every entry instead."""
     cw = t["canvas_w"]
-    if canvas is None:
-        canvas = compose_canvas(data, t)
+    forced = canvas is not None
+    cache = {}
+    nbanks = len(_bank_list(t))
+
+    def state(b):
+        if b not in cache:
+            cache[b] = [compose_canvas(data, t, b), None]
+        return cache[b]
+
+    def run(st, e):
+        if e["fmt"] == PSMT8 and st[1] is None:
+            st[1] = unswizzle8(st[0], cw, t["canvas_h"])
+        return _decode_one(t, e, st[0], st[1])
+
+    forced_state = [canvas, idx8]
+    if forced and canvas is not None and "canvas_h" not in t:
+        compose_canvas(data, t, 0)              # sets canvas_h
     for e in t["entries"]:
-        w, h, x0, y0 = e["w"], e["h"], e["x"], e["y"]
+        w, h = e["w"], e["h"]
         if w == 0 or h == 0 or w > 4096 or h > 4096:
             continue
-        rgba = bytearray(w * h * 4)
-        if e["fmt"] == PSMT8:
-            if idx8 is None:
-                idx8 = unswizzle8(canvas, cw, t["canvas_h"])
-            pal = clut_at(canvas, cw, e["palx"], e["paly"])
-            pal = [bytes(p) for p in pal]
-            aw = cw * 2
-            for y in range(h):
-                irow = (y0 + y) * aw + x0
-                if irow + w > len(idx8):
+        if forced:
+            yield e, w, h, run(forced_state, e)
+            continue
+        own = entry_bank(t, e)
+        rgba = run(state(own), e)
+        if nbanks > 1 and not any(rgba):
+            for b in range(nbanks):
+                if b == own:
+                    continue
+                alt = run(state(b), e)
+                if any(alt):
+                    rgba = alt
                     break
-                orow = y * w * 4
-                for x in range(w):
-                    rgba[orow + x * 4:orow + x * 4 + 4] = pal[idx8[irow + x]]
-        elif e["fmt"] == PSMT4:
-            pal = [bytes(p) for p in clut16_at(canvas, cw, e["palx"], e["paly"])]
-            nib = read_psmt4_rect(canvas, cw, x0, y0, w, h)
-            for i, v in enumerate(nib):
-                rgba[i * 4:i * 4 + 4] = pal[v]
-        else:                                   # fmt 0: raw CT32 region
-            for y in range(h):
-                s = ((y0 + y) * cw + x0) * 4
-                row = canvas[s:s + w * 4]
-                orow = y * w * 4
-                for x in range(min(w, len(row) // 4)):
-                    r, g, b, a = row[x * 4:x * 4 + 4]
-                    rgba[orow + x * 4:orow + x * 4 + 4] = bytes((r, g, b, min(a * 2, 255)))
-        yield e, w, h, bytes(rgba)
+        yield e, w, h, rgba
 
 
 def cmd_decode(chrfile, outdir):
@@ -463,7 +543,7 @@ def cmd_decode(chrfile, outdir):
     gray = b"".join(bytes((v, v, v, 255)) for v in idx)
     write_png(out / "_atlas_index.png", cw * 2, t["canvas_h"] * 2, gray)
     n = 0
-    for e, w, h, rgba in decode_entries(data, t, canvas, idx):
+    for e, w, h, rgba in decode_entries(data, t):         # per-entry bank
         write_png(out / f"{e['i']:02d}_{e['name']}.png", w, h, rgba)
         n += 1
     note = " (decompressed from LZSS)" if t.get("compressed") else ""
@@ -597,33 +677,27 @@ def recolor(data, hue, mode):
 
 
 # ---------------------------------------------------------------------------
-# ISO plumbing (X3.01+X3.02 are contiguous: ISO byte = extent + Lba0 offset)
+# ISO plumbing: every location comes from the disc's own X3.00/X3.10/X3.20
+# index (disc.Disc), so these work on USA, the May 2006 prototype and Japan.
+# lba/Lba0.txt is kept only as a test oracle (lba_rows, self_test).
 # ---------------------------------------------------------------------------
 
-def _iso_x301_base(iso):
-    iso.seek(16 * 2048)
-    pvd = iso.read(2048)
-    if pvd[1:6] != b"CD001":
-        sys.exit("not an ISO9660 image")
-    rext, = struct.unpack("<I", pvd[156 + 2:156 + 6])
-    rsz, = struct.unpack("<I", pvd[156 + 10:156 + 14])
-    iso.seek(rext * 2048)
-    d = iso.read(rsz)
-    off = 0
-    while off < rsz:
-        ln = d[off]
-        if ln == 0:
-            off = (off // 2048 + 1) * 2048
-            continue
-        nl = d[off + 32]
-        if d[off + 33:off + 33 + nl].split(b";")[0] == b"X3.01":
-            ext, = struct.unpack("<I", d[off + 2:off + 6])
-            return ext * 2048
-        off += ln
-    sys.exit("X3.01 not found in ISO root")
+def _lba_note(lba_dir):
+    if lba_dir:
+        print(f"note: --lba {lba_dir} is ignored: locations now come from the disc's own index "
+              "(lba/ is kept only as a test oracle)", file=sys.stderr)
+
+
+def _open(isopath, writable=False):
+    from disc import Disc
+    try:
+        return Disc(isopath, writable=writable)
+    except ValueError as e:
+        sys.exit(f"{isopath}: {e}")
 
 
 def lba_rows(lba_dir=None):
+    """lower-case path -> (offset past X3.00, size, path) from a USA Lba0.txt; test oracle only."""
     rows = {}
     lba = Path(lba_dir) if lba_dir else HERE / "lba"
     for line in (lba / "Lba0.txt").read_text().splitlines():
@@ -634,63 +708,123 @@ def lba_rows(lba_dir=None):
 
 
 def cmd_iso_extract(isopath, discpath, outfile, lba_dir=None):
-    row = lba_rows(lba_dir).get(discpath.lower())
-    if not row:
-        sys.exit(f"{discpath} not in Lba0.txt (only Lba0/X3.0x files supported)")
-    off, sz, _ = row
-    with open(isopath, "rb") as iso:
-        base = _iso_x301_base(iso)
-        iso.seek(base + off)
-        Path(outfile).write_bytes(iso.read(sz))
-    print(f"{discpath} ({sz} bytes) -> {outfile}")
+    _lba_note(lba_dir)
+    with _open(isopath) as d:
+        hit = d.lookup(discpath)
+        if hit is None:
+            sys.exit(f"{discpath} is not in the index of {Path(isopath).name}")
+        data = d.read_entry(hit[1])
+    Path(outfile).write_bytes(data)
+    print(f"{discpath} ({len(data)} bytes) -> {outfile}")
 
 
 def cmd_iso_patch(isopath, discpath, infile, lba_dir=None):
-    row = lba_rows(lba_dir).get(discpath.lower())
-    if not row:
-        sys.exit(f"{discpath} not in Lba0.txt")
-    off, sz, _ = row
+    """Same-size write in place (verified). Different sizes, Disc 1 + Disc 2 pairs and
+    copies go through cli.py patch (patch.py)."""
+    from disc import DiscError
+    _lba_note(lba_dir)
     new = Path(infile).read_bytes()
-    if len(new) != sz:
-        sys.exit(f"size mismatch: slot is {sz} bytes, file is {len(new)} — "
-                 "only same-size edits are supported")
-    with open(isopath, "r+b") as iso:
-        base = _iso_x301_base(iso)
-        iso.seek(base + off)
-        iso.write(new)
-        iso.seek(base + off)
-        if iso.read(sz) != new:
-            sys.exit("read-back verification FAILED")
+    with _open(isopath, writable=True) as d:
+        hit = d.lookup(discpath)
+        if hit is None:
+            sys.exit(f"{discpath} is not in the index of {Path(isopath).name}")
+        e = hit[1]
+        if len(new) != e.size:
+            sys.exit(f"size mismatch: slot is {e.size} bytes, file is {len(new)} — only same-size "
+                     "edits here (cli.py patch handles other sizes, with --grow)")
+        try:
+            d.write_entry(e, new)
+        except DiscError as ex:
+            sys.exit(str(ex))
     print(f"patched {discpath} in {isopath} (verified)")
 
 
 def cmd_iso_sweep(isopath, match, mode, hue, lba_dir=None):
+    """Recolor every .chr whose path contains ``match``, in place, every chain of the image."""
+    from disc import DiscError
     if mode not in ("blue", "warm"):
         sys.exit("mode must be 'blue' or 'warm'")
+    _lba_note(lba_dir)
     total = files = 0
-    with open(isopath, "r+b") as iso:
-        base = _iso_x301_base(iso)
-        for key, (off, sz, path) in sorted(lba_rows(lba_dir).items()):
-            if match.lower() not in key or not key.endswith(".chr"):
-                continue
-            iso.seek(base + off)
-            data = iso.read(sz)
+    with _open(isopath, writable=True) as d:
+        todo = sorted({e.path: e for _, e in d.entries()
+                       if match.lower() in e.path.lower() and e.path.lower().endswith(".chr")
+                       and e.size > 0}.values(), key=lambda e: e.path.lower())
+        for e in todo:
+            data = d.read_entry(e)
             try:
                 new, edits = recolor(data, hue, mode)
             except (ChrError, xcpack.XcError) as ex:
-                print(f"  skip {path}: {ex}")
+                print(f"  skip {e.path}: {ex}")
                 continue
             if not edits:
-                print(f"  {path}: nothing matched")
+                print(f"  {e.path}: nothing matched")
                 continue
-            iso.seek(base + off)
-            iso.write(new)
-            iso.seek(base + off)
-            assert iso.read(sz) == new, f"read-back failed: {path}"
-            print(f"  {path}: {edits} palette words")
+            try:
+                d.write_entry(e, new)          # same size; reads back
+            except DiscError as ex:
+                print(f"  skip {e.path}: {ex}")
+                continue
+            print(f"  {e.path}: {edits} palette words")
             total += edits
             files += 1
     print(f"{files} files, {total} palette words recolored (verified)")
+
+
+def add_commands(subparsers):
+    """Nothing to register: cli.py registers chr-decode ... chr-iso-sweep itself."""
+
+
+def self_test():
+    """ISO plumbing on a synthetic image and, with XS3_D1 set, read-only on
+    the real Disc 1 (index vs the lba/Lba0.txt oracle)."""
+    import contextlib
+    import io
+    import os
+    import tempfile
+    import disc as disc_mod
+    ok = True
+
+    def check(cond, msg):
+        nonlocal ok
+        print(("ok    " if cond else "FAIL  ") + msg)
+        ok &= bool(cond)
+
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        p = td / "syn.iso"
+        disc_mod._synthetic_image(p)
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_iso_extract(str(p), "\\mnu\\us\\font0.bin", str(td / "f.bin"))
+        check((td / "f.bin").read_bytes() == bytes(range(256)) * 10, "iso-extract through the disc's index")
+        (td / "g.bin").write_bytes(bytes(255 - (i % 256) for i in range(2560)))
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_iso_patch(str(p), "mnu/us/font0.bin", str(td / "g.bin"))
+        with disc_mod.Disc(p) as d:
+            check(d.read("mnu\\us\\font0.bin") == (td / "g.bin").read_bytes(), "iso-patch same size, read back")
+        (td / "h.bin").write_bytes(b"x")
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_iso_patch(str(p), "mnu/us/font0.bin", str(td / "h.bin"))
+            check(False, "iso-patch refuses a different size")
+        except SystemExit:
+            check(True, "iso-patch refuses a different size")
+    d1 = os.environ.get("XS3_D1")
+    if d1:
+        with disc_mod.Disc(d1) as d:
+            x300 = d.readers[0].sizes[0]
+            want = lba_rows()
+            got = {e.path.lower() if e.path.startswith("\\") else "\\" + e.path.lower():
+                   (e.byte_offset - x300, e.size) for _, e in d.entries(0)}
+            same = sum(1 for k, (o, sz, _) in want.items() if got.get(k) == (o, sz))
+            check(same == len(want), f"D1: index == lba/Lba0.txt oracle for {same}/{len(want)} rows")
+            kos = [e for _, e in d.entries() if "c3kosmos00.chr" in e.path.lower()]
+            check(len(kos) == 1 and recolor(d.read_entry(kos[0]), 0.92, "blue")[1] > 0,
+                  "D1: C3kosmos00.chr found by index and recolors (sweep input)")
+    else:
+        print("SKIP  disc checks (set XS3_D1)")
+    print("self-test", "passed" if ok else "FAILED")
+    return 0 if ok else 1
 
 
 # ---------------------------------------------------------------------------
@@ -707,6 +841,8 @@ def _main():
     if not a:
         sys.exit(__doc__)
     cmd = a[0]
+    if cmd == "--self-test":
+        sys.exit(self_test())
     if cmd == "decode":
         cmd_decode(a[1], a[2])
     elif cmd == "export-palettes":

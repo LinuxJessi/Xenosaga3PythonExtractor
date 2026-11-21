@@ -25,7 +25,7 @@ each one demonstrably reduces them:
   it directly from a terminal
 
 Build (from repo root, on Windows):
-    python -m pip install -r requirements.txt pyinstaller pillow capstone
+    python -m pip install -r requirements.txt pyinstaller
     python packaging/render_version_info.py
     python packaging/build_icon.py
     pyinstaller --noconfirm --clean packaging/xenosaga-extractor.spec
@@ -48,12 +48,25 @@ DATAS = [
 ]
 DATAS = [(src, dst) for src, dst in DATAS if Path(src).exists()]
 
-HIDDEN = [
+# The kit's requirements (requirements.txt) — all required, all bundled.
+REQUIRED = [
+    "numpy",
     "PIL",
     "PIL.Image",
     "PIL.ImageDraw",
     "capstone",
+    "fontTools",
+    "fontTools.ttLib",
+    "uharfbuzz",
 ]
+
+# Every module of the kit: cli.py imports the command modules by name
+# (importlib, COMMAND_MODULES / SELF_TESTS) and several commands import
+# lazily, so PyInstaller's static scan would miss them. Listing them all keeps
+# a release complete (pattern from Xenosaga2PythonExtractor's spec).
+KIT = sorted(p.stem for p in REPO.glob("*.py") if p.stem not in ("gui", "cli", "__init__"))
+
+HIDDEN = REQUIRED + KIT + ["cli"]
 
 
 def _analysis(entry: str) -> Analysis:

@@ -134,7 +134,7 @@ Sub-resource types (the 4-byte tags inside the package's Xp directory):
 | `xhr`  | XHR — heirarchy | Skeleton / bone hierarchy. `CURRENT_XHR_VERSION` asserts versions. |
 | `xap`  | XAP — animation package | Animation clip bundle. `XacKeyType_Hermite` curves inside. |
 | `xac`  | XAC — animation curves | Individual curve resources inside an XAP. `CURRENT_XAC_VERSION`. |
-| `pxy`  | "proxy" geometry | Lightweight collision / proxy mesh. |
+| `pxy`  | "proxy" geometry (the name only) | The full render mesh of the package, not a collision / proxy mesh. |
 | `txy`  | texture proxy | Texture block of the package: CT32 strip uploads composing a GS canvas, a named entry table (PSMT8 / PSMT4 / raw CT32 rects with CLUT positions); field maps carry two upload banks. Spec: [chr-txy-format.md](chr-txy-format.md). The same record also appears free-standing inside `.esd`/`.esp`/`.sme` (effect sprites). |
 | `xst`  | XST — static? | Static state tables. |
 | `epf`  | effect/face? | Bound to face animation in characters. |
@@ -153,9 +153,9 @@ the "FAC" version of XAP.
 
 | Ext   | Magic   | Notes |
 |-------|---------|-------|
-| `.xtx`| `XTX\0` + u32 size + u32 count + u32 hdr-size + u16 width + u16 fmt + u32 height … | MonolithSoft texture format. 750 across both discs (375 each, mostly the same UI textures). Used for character portraits in `kao/`, UI windows (`window0/1/2.xtx`, `ctrl.xtx`), menu icons. **All decoded to PNG under `browse/textures_png/`.** The 367 linear (fmt=0x04) per disc are straight 32bpp RGBA. The 8 swizzled (fmt=0x08) ones turned out to be the Xenosaga I layout: a CT32 canvas holding a PSMT8 8-bit image at 2× the header dimensions ("128×128" ctrl.xtx is really a 256×256 DualShock diagram), unswizzled with the standard PS2 `unswizzle8` routine. Their CSM1 palettes are embedded as 16×16 canvas tiles; the palette↔region binding lives in SLUS, so multi-palette sheets (window0-2, itemcap, segcap) get a coherence-ranked *guess* — geometry right, **tint known-wrong (sepia/grey), fix planned** — plus a `*_index.png` ground-truth index map. |
+| `.xtx`| `XTX\0` + u32 size + u32 count + u32 hdr-size + u16 width + u16 fmt + u32 height … | MonolithSoft texture format. 750 across both discs (375 each, mostly the same UI textures). Used for character portraits in `kao/`, UI windows (`window0/1/2.xtx`, `ctrl.xtx`), menu icons. **All decoded to PNG under `browse/textures_png/`.** The 367 linear (fmt=0x04) per disc are straight 32bpp RGBA. The 8 swizzled (fmt=0x08) ones turned out to be the Xenosaga I layout: a CT32 canvas holding a PSMT8 8-bit image at 2× the header dimensions ("128×128" ctrl.xtx is really a 256×256 DualShock diagram), unswizzled with the standard PS2 `unswizzle8` routine. Pixels start at 0x50: the header offset (0x30) points at a 32-byte GS upload packet (DMA tag, VIF DIRECT, GIF IMAGE tag) and every file is exactly 0x50 + W×H×4 bytes. Their CSM1 palettes are embedded as 16×16 canvas tiles on the 16-word grid at the bottom of the canvas; the palette↔region binding lives in SLUS, so the decoder ranks them: base palette by spatial coherence, then one palette per picture where the sheet is a grid of as many pictures as palettes (itemcap, segcap), else per 64-px block by hue coherence. Item icons (itemcap), location thumbnails (segcap), portraits (window0-2) and the minigame sheet render in true colour; the flat UI parts of window0-2 are still a guess and titleobj (no parked palette) is grayscale — plus a `*_index.png` ground-truth index map. |
 | `.txd`| 4 / 4 (`mnu/us/`) | **Text data, not textures**: an offset table + NUL-terminated strings with `$cmd;` layout codes. `menutext.txd` = the whole menu UI (907 strings; count-prefixed table variant), `synopsis.txd` (chapter synopses, bonus unlock text), `discchg.txd` (disc-change / save prompts), `devchk.txd` (memory-card messages). Decoded by the `text` kind as `*.txd.txt`. |
-| `.txy`| `txy\0` + u32 version | Texture index/manifest (pairs with `.pxy` of same stem). Pure index data, not pixels. |
+| `.txy`| `txy\0` + u32 version | Texture block (pairs with `.pxy` of same stem). Carries the pixels (the same record as the package `txy`), not just an index. |
 | `.tm2`| `TIM2` magic | Sony's PS2 SDK image format. **Decoded to PNG**; in this game they are all 32bpp RGBA with no palette — chapter-select background (`haikei.tm2`) and episode logos (`logo_ep1`, `logo_ep2`, `logo_pp`). |
 
 ### Effects (particle systems)
@@ -170,7 +170,7 @@ the "FAC" version of XAP.
 | Ext  | Count | Pairs with | What it is |
 |------|-------|------------|------------|
 | `.t` | 647 / 647 | `cf/{id}.t` | Tab-separated text manifest for cutscene/encounter `{id}`. Lists `map`, `ene` (enemy), `mdl` entries by name. CRLF, UTF-8. |
-| `.sb`| 715 / 715 | `cf/us/{id}.sb` | **Scene script bank** (not a sound bank): `SB  ` magic, then up to six sections of `{u32 kind=8, u32 count, u32 offsets[]}`; the text section holds the scene's field dialogue and choices ("Board the E.S.?", "Yes\nNo"), voice-cue ids (`ce100_045`), and the writers' **EUC-JP** scene notes (BGM settings, stage directions) that shipped on the US disc. Decoded by the `text` kind as `*.sb.strings.txt`. |
+| `.sb`| 715 / 715 | `cf/us/{id}.sb` | **Scene script bank** (not a sound bank): `SB  ` magic, then up to six sections of `{u32 kind=8, u32 count, u32 offsets[]}`; the text section holds the scene's field dialogue and choices ("Board the E.S.?", "Yes\nNo"), voice-cue ids (`ce100_045`), and the writers' scene notes (BGM settings, stage directions) that shipped on the US disc: mostly **Shift-JIS** (cp932), some **EUC-JP**. Decoded by the `text` kind as `*.sb.strings.txt`. |
 
 ### Localized message data
 
@@ -201,7 +201,7 @@ here is in a format your OS can open without help.
 | `browse/images/`  | `.jpg`              | `.jpg`     | copy          | 1542 (D1) / 1524 (D2) files, 30 MB each disc |
 | `browse/textures/`| `.xtx .txy .tm2 .bmp .png` | unchanged | copy | BMP/PNG/TM2 are already viewable; XTX/TXY need a format converter |
 | `browse/textures_png/_packages/` | `.chr .wpn .map .esd .esp .sme` | `.png` | chrtex.py + xcpack.py (pure Python, multi-process) | ~20,900 unique textures per disc (~18,000 duplicates recorded, not re-written): every character/weapon atlas entry, every field & battle backdrop, every effect sprite. Manifest: `browse/package_textures.csv`. |
-| `browse/text/*.txd.txt`, `*.strings.txt` | `.txd .sb .bin .dat` | text | browse_bundle.py | menu text tables, in-map dialogue + EUC-JP scene notes, encyclopedia/database strings |
+| `browse/text/*.txd.txt`, `*.strings.txt` | `.txd .sb .bin .dat` | text | browse_bundle.py | menu text tables, in-map dialogue + Shift-JIS/EUC-JP scene notes, encyclopedia/database strings |
 | `browse/text/`    | `.txt .mes`         | unchanged  | copy          | 158 / 141 files; cutscene subtitles + menu strings. Subtitles pair 1:1 with `browse/movies/` |
 | `browse/movies/`  | `.sfd`              | `.mp4`     | ffmpeg (x264 CRF 23 + AAC 160 kbps) | 18 / 24 files. Plays in any modern player. |
 | `browse/audio/`   | `.adx`              | `.wav`     | ffmpeg (`pcm_s16le`) | 3995 / 2095 files. Voice clips, SFX, music loops. |
@@ -257,11 +257,13 @@ yet — they need format-specific work beyond the scope of this pipeline:
 - **Scene sound banks** (`.sb`) — `SB  ` magic + a table of section
   offsets; the payload looks like cue/sequence scripts (opcode streams)
   that reference samples in the `.dap` banks rather than embedded audio.
-- **Swizzled-XTX palette binding** — the 8 swizzled UI sheets per disc
-  decode geometrically (see the texture table above), but the per-region
-  palette assignments live in SLUS (not in OV02/OV04 — checked), so the
-  sheets are sepia/grey. Planned fix: capture the TEX0 CBP/CSA bindings
-  from EE RAM with a menu open and ship them as a per-sheet table.
+- **Swizzled-XTX palette binding** — the per-region palette assignments
+  live in SLUS (not in OV02/OV04 — checked). Since the 0x50 pixel-offset fix
+  (2026-11-20) the decoder's hue ranking gets the pictures right (icons,
+  thumbnails, portraits); the flat UI parts of window0-2 and titleobj's
+  palette (not in the file) are still open. The exact fix is still to
+  capture the TEX0 CBP/CSA bindings from EE RAM with a menu open and ship
+  them as a per-sheet table.
 
 Formerly on this list, now decoded: **swizzled XTX textures** (PSMT8 in a
 CT32 canvas — the Xenosaga I layout) and **DTPK sound banks** (`.dap` →
@@ -409,7 +411,7 @@ or run the same commands from the command line:
 ```bash
 cd ~/work-disc1                                              # one dir per disc
 cp -r /path/to/Xenosaga3PythonExtractor/lba ./               # vendored Lba0/1/2.txt
-pip install -r /path/to/Xenosaga3PythonExtractor/requirements.txt   # optional deps
+pip install -r /path/to/Xenosaga3PythonExtractor/requirements.txt   # required deps
 python /path/to/Xenosaga3PythonExtractor/cli.py prep         --iso  Disc1.iso --work .
 python /path/to/Xenosaga3PythonExtractor/cli.py map-regions  --work . \
     --assign "Lba0.txt=X3.01,X3.02" --assign "Lba1.txt=X3.11,X3.12,X3.13" \

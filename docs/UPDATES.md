@@ -5,6 +5,328 @@ to benefit from it. (Same convention as the Xenosaga I kit's
 `docs/UPDATES.md`; this file starts with the first improvement run ported
 back from that project.)
 
+## 2026-11-20 (fourth pass) — item icons and thumbnails in one palette each, bidi = ICU, typed '$'
+
+**itemcap / segcap: no more palette seams** (`xtx_decode.plan_palettes`).
+The pictures are 125x140 (item icons) and 75x65 (location thumbnails), so
+the 64-px blocks of the third pass straddled two pictures and split them
+between palettes: the gold ring was gold above y = 64 and silver below, a
+green bar sat under the pendant, and most thumbnails had a strip of the
+neighbour's palette. The decoder now finds the picture grid from the index
+map (seams where the index jump spikes; along itemcap's 2-px frames and
+8-px gutters the middle seam of the run) and, when there are exactly as
+many pictures as parked palettes, gives each picture a different palette by
+minimum total chroma score. Both sheets have 15 pictures and 15 palettes;
+the result is one palette per icon in column-major order (itemcap) and one
+per thumbnail in row-major order (segcap), checked cell by cell in the
+self-test and on all five discs. window0-2 and the minigame sheet do not
+form such a grid and render exactly as before (byte-identical PNGs).
+
+**Bidi now equals ICU 78 in three more corners** (`langpack.bidi_levels`):
+U+2329/U+232A pair with their canonical equivalents U+3008/U+3009 and are
+mirrored; a combining mark after a bracket that rule N0 resolved stays
+neutral (ICU's behaviour, not the letter of UAX #9); ZWJ/ZWNJ take the next
+character's level. 150,000 random strings with joiners and angle brackets
+give ICU's display string (270 of 30,000 differed before). The encoder still
+keeps a joiner inside the shaped run it belongs to.
+
+**A typed `$` is warned about** (`lang encode`, `lang preview`). The game
+treats every `$` as a command: its printer draws an unknown one after
+logging an error, but its width function skips to the next `;`, so the
+line is measured wrong. The preview used to drop the `$`; it now draws it
+the way the printer does. Do not write `$5`: write the amount without the
+sign (SCRIPTS.md).
+
+**What you have to do:** re-run `browse --kinds textures_png` for the new
+itemcap/segcap PNGs; re-encode translations that use angle brackets or
+joiners in right-to-left text; remove any `$` typed as text.
+
+## 2026-11-20 (third pass) — XTX pixel offset fixed, UI sheets in colour
+
+![UI sheets before/after the XTX fix](screenshots/xtx-palettes-2026-11-20.jpg)
+
+**The XTX pixels start at 0x50, not 0x30** (`xtx_decode.py`). The header's
+offset field (+0x20, always 0x30) points at a 32-byte GS upload packet: a
+zero DMA tag, a VIF DIRECT code (`0x50 << 24 | W*H*4/16 + 1`) and a GIF
+IMAGE tag (NLOOP `W*H*4/16`, EOP). Every one of the 1,875 XTX files on the
+five discs (USA 1/2, Japan 1/2, May 2006 prototype) carries it and is exactly
+`0x50 + W*H*4` bytes long. The decoder read from 0x30, so every picture was
+shifted 8 words right with row wrap (16 px on the swizzled sheets, 8 px on
+the `kao\` portraits) and the "32-byte trailer" was the last row's pixels.
+It now validates the packet's tag words and reads after it (a file without
+the packet falls back to the header offset).
+
+**The sepia/grey limitation is mostly gone.** With the canvas aligned, the
+parked palettes sit exactly on the 16-word grid, and two changes to palette
+selection make use of it:
+
+- a CLUT tile must have at least 26 fully opaque entries (raw alpha 0x80).
+  Real palettes have 16-100 %, the look-alikes made of index bytes have 0 %
+  (window0: 24 real tiles, 185 look-alikes dropped; itemcap: 15 and 247);
+- per 64-px block, the palette with the smoothest **hue** wins. Many sheets
+  park one brightness-sorted palette per picture, and all of them render any
+  index map as a smooth grey-ish picture, which is why the old ranking
+  always settled on a ramp. Hue separates them.
+
+Result: the 15 item icons (itemcap, one palette each, column-major), the 15
+location thumbnails (segcap), the window-sheet portraits (8 palettes, one
+per 64-px block: KOS-MOS blue, Jr. red, MOMO pink, Chaos silver) and the
+minigame sheet (`mg1\xx\picture`) render in their real colours.
+
+What is still a guess: block edges do not follow picture edges, so a 64-px
+block that straddles two icons can take the neighbour's palette (in itemcap
+this reached inside icons: the gold ring was half silver; fixed in the fourth
+pass above); the flat UI parts of window0-2 (glyphs,
+gauges, frames) have no hue to rank and keep the base ramp or a guessed
+palette. The HUD letter and digit cells are exact through `xtx-export --bind
+statfont` (palette pointers from the executable). `titleobj` holds no
+palette at all (it comes from elsewhere in VRAM) and renders as grayscale
+indices. `*_index.png` is exact for every sheet.
+
+`xtx_encode` now takes its palette plan from the decoder
+(`xtx_decode.plan_palettes`), so `xtx-export`'s render equals `browse`'s
+PNG. Checked on all 1,875 files: header/packet/canvas re-encode
+byte-identical; the decoder's PNG (fmt 4) and `*_index.png` (fmt 8) import
+back byte-identical; a one-pixel edit to the decoder's index map lands on
+the same pixel after encode + decode. segcap (246-word canvas) still
+decodes only.
+
+**What you have to do:** re-run `browse --kinds textures_png`. **Index
+PNGs or edits made from the old decoder's output are shifted 16 px
+(swizzled) / 8 px (portraits) — re-export with `xtx-export` before
+importing.** `xtx_decode` now has its own self-test (`self-test` runs 32
+modules).
+
+## 2026-11-20 (second pass) — Japanese discs, writing back, new scripts, Blender in one step
+
+The second pass of the parity work. It adds the Japan retail pair, the whole
+write side (text, fonts, pictures, any file) and the Xenosaga I translation
+pipeline. **Nothing written by these commands has been booted in PCSX2.**
+Every write test ran on copies of the real images (APFS clones, deleted
+afterwards) and every check is a read-back from those copies, not a boot.
+
+**Japanese discs** (`region.py`, `textcodec.py`, `sb.py`, `subtitle.py`,
+`txd.py`, `njbin.py`, new `msgdat.py` and `batdat.py`):
+
+- SLPS_256.40 / 256.41 are a verified profile, recognised by the boot
+  executable's sha256. `region -v` checks 46 named executable addresses
+  against the code (function signatures, data references, content hashes,
+  the pair gate, the proportional-cell immediates); all 46 pass on both
+  Japanese and both USA discs.
+- `resolve` finds a file the way the engine does: the language folder first,
+  then the folder root (Japan keeps `jpg\`, `ef\map\`, `ef\esp\` and
+  `mnu\pse\` there).
+- The Japanese codec (`JpCodec`) follows the executable's gate: any byte from
+  0xA0 starts a pair. All 856 Japanese `.sb` files, the four `.txd`, the
+  seven menu databases, `Message.Dat` and the subtitles rebuild
+  byte-identically.
+- `Message.Dat` and `batdat.bin` are parsed on all three builds
+  (`msgdat-strings`, `batdat-strings`). The `batdat.bin` string fields are
+  derived from the file's structure, not traced in game code. The meaning of
+  USA `Message.Dat`'s three per-message arrays is unknown; they are kept as
+  they are.
+- 140 scenes exist only on the Japanese discs. They are flagged
+  "JP-only, load status unknown".
+- `mixed_regions` refuses USA + Japan and USA + prototype pairs.
+
+**Writing to discs** (new `patch.py`; `disc.py`, `repack.py`, `chrtex.py`):
+
+- `patch` writes any set of files into copies of one disc or a Disc 1 +
+  Disc 2 pair. A file that fits is written in place; with `--grow` a file
+  that does not is appended at the image end. A file in the shared X3.00
+  index lands at the same sector on both discs, so the two discs' X3.00 stay
+  identical. To do that the shorter image is padded first: USA Disc 1 grows
+  from 1,915,920 to 2,205,056 sectors on its first shared grow. This is a
+  safety choice; whether the engine re-reads X3.00 after a disc swap is not
+  known.
+- A sector budget (DVD-5 or DVD-9 by image type, `--ceiling` overrides) is
+  checked before any copy is made. Every index is re-serialised and every
+  patched file read back before the output is renamed into place.
+- `repack-*` and `chr-iso-*` now find files through the disc's own index
+  on any build; `--lba` is accepted and ignored. Bug fix: `repack-patch
+  --pad` now updates the index's size field (it used to leave the old size).
+
+**Text back in** (`textpack.py`, new `align.py`; [TRANSLATING.md](TRANSLATING.md)):
+
+- `text-export` writes one tree for Disc 1 + Disc 2 (manifest FORMAT 2:
+  build, executable hash, X3.00 hash, chain per object). Trees from the first
+  pass are refused with "export again".
+- `text-import` refuses anything the disc's codec cannot encode, any typed
+  character the disc's own fonts have no ink for, renamed or reordered keys,
+  a tree from another build, and growth without `--grow`. Nothing is written
+  unless every object passes. No loader buffer size is known for any text
+  object, so `--grow` is a user override, not a proof of safety.
+- Unchanged trees round-trip byte-identically: 886 objects on Disc 1, 869 on
+  Disc 2, 886 on the prototype, 1,025 on Japan Disc 1, 1,010 on Japan Disc 2.
+- `align-export` lines up the Japanese and USA script: `.sb`, `.txd` and
+  subtitles to TSV, JSON and dual-language SRT.
+
+**New scripts** (new `langpack.py`, `glyphs.py`; `font.py`;
+[SCRIPTS.md](SCRIPTS.md), [FONT.md](FONT.md)):
+
+- `lang scan / encode / import / preview`, ported from the Xenosaga I kit:
+  HarfBuzz shaping, right-to-left, pixel wrapping, `--extend` for a second
+  script, multi-font packs. `--donor` brings kana and kanji from the Japanese
+  font for Japanese on the USA build; `--unlock` also patches the USA
+  executables to the Japanese gate. Tested with Arabic, Devanagari and
+  Japanese on copies of the USA discs.
+- `font.py` reads each build's rules from its executable (pair gate,
+  proportional range, the A9 row). `font-jp-kana` (from the Episode II font)
+  is replaced by `font-donor`, which copies cells between Episode III fonts
+  and refuses unless the two fonts' kanji agree.
+- `glyphs-slots / -coverage / -render / -apply / -unlock`: free cells per
+  build (USA Disc 1: 123 proportional + 51 wide), TTF rendering, and the
+  executable unlocks. Every Japanese character in the retail text resolves
+  to an inked cell except the full-width space and 縊 (E5D0, once, in
+  `bat\jp\RAV_B02.sb`), which neither Japanese font draws.
+
+**Pictures and HUD letters** (new `xtx_encode.py`, `imagetext.py`,
+`statfont.py`):
+
+- `image-export / -import`: 1,131 localized pictures on USA Disc 1 (JPEG,
+  PNG, `.xtx`, `.tm2`, effect `txy`) to PNG and back, within the file's
+  sector allocation; an unchanged export imports to zero changed files.
+- `xtx-export / -encode`: the UI sheets re-encode byte-identically.
+- `statfont-export / -import`: the battle HUD's bitmap letters, in the window
+  sheets, and their byte and width tables in the executable, on both builds.
+- Found while doing this: `xtx_decode.py` reads the canvas 32 bytes early
+  (the pixels start at 0x50, after a GS upload packet), so its PNGs are
+  shifted right by 16 px (8-bit sheets) or 8 px (portraits). `xtx_encode`
+  reads from 0x50. The decoder itself is not fixed yet, and its
+  `*_index.png` files must not be fed to `xtx-encode`.
+
+**Models** (new `blend.py`; `models_sweep.py`; [BLENDER.md](BLENDER.md)):
+
+- `blend` writes a `.blend` with Blender in the background and checks it in a
+  second run: textures packed, Material Preview, the view framed, the
+  armature drawn as sticks instead of the importer's bone spheres.
+- `models` reads any disc through the disc's own index, Japan included. Each
+  disc: 1,609 models, 1,586 ok, 20 with an empty mesh slot, 3 `unexplained`
+  maps (`E3_HAK16.map`, `E3_HAK01_EV03.map` and its standalone `.pxy`). The
+  first pass counted those 3 as ok. 24 models differ between Japan and USA.
+
+**GUI and browse:**
+
+- The GUI is rebuilt from the command line's own parser (after the Xenosaga
+  II GUI): a card per command, grouped by section, discs found by content
+  (USA, Japan, prototype), 127.0.0.1 only, cross-site POSTs refused.
+- `browse` follows the build of the dump it reads (`--region`, default auto:
+  the boot executable in the dump, else the language folder). Japanese
+  text is read with the Japanese codec; `Message.Dat`, `batdat.bin` and the
+  menu databases go through their parsers instead of the ASCII sniff;
+  subtitles and `.mes` files also get a UTF-8 `*.utf8.txt`; on a Japanese
+  dump the JP-only scenes are listed in `text/JP-ONLY.txt`.
+
+**Still open:**
+
+- A PCSX2 boot of anything the kit writes: edited and grown text, new glyphs,
+  right-to-left lines, the executable unlocks, the Disc 1 padding rule.
+- Loader buffer sizes for text objects; the subtitle packer's size rule.
+- `batdat.bin` fields from game code; USA `Message.Dat`'s per-message arrays.
+- Overlay strings (an evt/ovl import as in the Xenosaga I kit) and `.xep`.
+- The `xtx_decode.py` offset fix (done in the third pass, above).
+
+**To benefit:** re-export text trees (`text-export`), since FORMAT 1 trees are
+refused. Re-run `browse --kinds text` on a Japanese dump. Run `python cli.py
+self-test` with `XS3_D1`, `XS3_D2`, `XS3_PROTO`, `XS3_JP1` and `XS3_JP2` set.
+
+## 2026-11-20 — parity with the Xenosaga I/II kits: disc index, models, text, fonts
+
+The Xenosaga II kit runs on the same engine as Episode III, so most of its
+modules were brought over and checked against both US discs and the May 2006
+prototype. Each copied module says at the top which kit and module it was
+borrowed from and what changed. All the new commands are in `cli.py`, and
+`python cli.py self-test` runs every module's self-test.
+
+**Reading the disc directly** (no 7-Zip, no vendored `lba/` tables):
+
+- `iso9660.py` and `toc_bin.py` read the ISO and its X3.00/X3.10/X3.20
+  indexes. `chains.py` maps the containers, `disc.py` resolves in-game paths
+  (with write primitives for the later repack path), and `region.py` holds the
+  build profiles. `region.py` is a different module from `regions.py`, the
+  LBA-to-container mapper.
+- New commands:
+  - `list` and `dump` (the latter writes `dump/chainN/...` plus `manifest.csv`)
+  - `region`: build, executable sha256 and language folder; warns when you
+    mix discs from different builds
+  - `iso-ls`
+  - `toc-check`
+- The six index files rebuild byte for byte. On the retail discs, X3.00 matches
+  `lba/Lba0.txt` line for line, and the prototype reads correctly.
+
+**Models to glTF** (`vif.py`, `gltf.py`, `xhr.py`, `pxy.py`, `models_sweep.py`;
+see [MODELS.md](MODELS.md) and [BLENDER.md](BLENDER.md)):
+
+- `model --iso D1.iso --path 'mdl\chr\pc\C3kosmos00.chr'` converts one
+  model.
+- `models --iso D1.iso [--iso D2.iso] --out DIR` converts all 1,609 models on
+  each disc and writes `models.csv`. `glb-info` summarises a .glb file.
+- On all three discs, 1,589 models convert and pass every check. The other 20
+  have an empty mesh slot. Header and decoded triangle counts agree for every
+  model. Skinned meshes come out with a skeleton, and KOS-MOS's rest pose is
+  exact to 5e-8.
+- `browse` has a new kind, `models`, which writes `models/<path>.glb` and
+  `models/models.csv`.
+
+**Text** (`textcodec.py`, `sb.py`, `txd.py`, `njbin.py`, `subtitle.py`,
+`textpack.py`):
+
+- `text-export` writes a UTF-8 tree and a manifest covering the .sb scene
+  scripts, the .txd menu tables, the nj/DBC databases, the subtitles and the
+  pse files. `text-roundtrip` checks that an unchanged export rebuilds
+  byte-identical.
+- Every object on D1, D2 and the prototype rebuilds byte-identical.
+- The USA codec follows the executable's own two-byte rule (SLUS
+  `FUN_00181e48`). Bytes it cannot show become `⟦XX⟧` escapes, so every
+  reading is exact.
+- **`browse` text output changed.** The text files now use these codecs
+  instead of the old UTF-8/EUC-JP guesses:
+  - `.txd` strings and displayed `.sb` lines use the USA reading, so
+    `Möbius` and `<×>` come out right.
+  - The developers' notes in `.sb` files are marked `[note cp932]` or
+    `[note euc_jp]`. Most of them are Shift-JIS; the old reader decoded them
+    as EUC-JP.
+
+**Fonts** (`font.py`; see [FONT.md](FONT.md)):
+
+- New commands:
+  - `font-extract`: sheet PNGs, metrics CSV, the 8x8 system font, and a code
+    table
+  - `font-rebuild`
+  - `font-measure`: the game's own width function
+  - `font-jp-kana`: restores the Japanese kana cells from the Episode II
+    Japan font
+- Both fonts rebuild byte-exact on all three discs.
+
+**Requirements are now required.** numpy, Pillow, capstone, fonttools and
+uharfbuzz are listed as required in `requirements.txt`:
+
+- The launchers (`launch.command`, `launch.sh`, `launch.bat`) install them on
+  first run into a private `.venv/` beside the kit, following the Xenosaga II
+  launchers.
+- The Windows build spec bundles them, along with every kit module.
+- `disasm` no longer has its own "capstone is not installed" path.
+- If a requirement is missing, the CLI refuses to run and asks you to install
+  the requirements. `self-test` reports the missing one as a failure.
+- No XS3 module calls fonttools or uharfbuzz yet; they are there for the
+  translation work to come, as in the Xenosaga I kit.
+
+**Still open:**
+
+- `bat\us\batdat.bin` and `mg1\us\Message.Dat` text layouts.
+- `.xap` animation.
+- The text write path (budgets, font check on typed characters, writing back
+  to an ISO). `disc.py` has the primitives, but growing a file past the
+  bigfile extent has not been booted in PCSX2 yet.
+- The Japanese profile stays unverified until a Japanese image is hashed.
+- The older commands (`repack-*`, `chr-iso-*`) still use the static `lba/`
+  tables.
+
+**To benefit:** start the kit with a launcher once so it installs the
+requirements, or run `python -m pip install -r requirements.txt`. Then run
+`python cli.py self-test`. Set `XS3_D1`, `XS3_D2` and `XS3_PROTO` to your ISO
+paths to include the disc checks.
+
 ## 2026-11-05 — Lba tables straight from the disc (`lba-from-iso`)
 
 The kit used to depend on `lba/Lba0/1/2.txt`, which were made in 2006 by
@@ -126,7 +448,7 @@ at the entry's `pal_x/pal_y`.
   ASCII runs) as `*.strings.txt`. `.t` scene manifests (tab-separated
   text) join the `text` kind. Disc 1: 4 `.txd` + ~730 string tables.
 
-### Swizzled UI sheets: better, **not finished — known sepia/grey tint**
+### Swizzled UI sheets: better, **not finished — known sepia/grey tint** (mostly fixed 2026-11-20, see the third-pass entry)
 
 ![UI sheet palettes before/after](screenshots/improve-ui-palettes.png)
 
@@ -202,7 +524,7 @@ re-run.
 * `.xep` event packages start with `Xc\x01\x03` but are not MR packages
   and do not decode with any of the four LZSS flavours — the event loader
   has its own scheme.
-* **UI sheet colours (planned for a future release).** window0-2 /
+* **UI sheet colours** (2026-11-20: mostly fixed by the 0x50 pixel offset + hue ranking; see the third-pass entry). window0-2 /
   itemcap / segcap are geometrically right but sepia/grey — see above. A
   colourfulness tie-breaker tried on 2026-09-24 made things worse (wrong
   palettes pass the gate, portraits wash out) and was not shipped. A
