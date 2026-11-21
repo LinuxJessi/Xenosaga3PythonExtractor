@@ -144,6 +144,7 @@ SECTION_OF = {
     "browse": "Browse", "chr-decode": "Browse", "chr-palettes": "Browse",
     # Models
     "model": "Models", "models": "Models", "glb-info": "Models", "blend": "Models",
+    "motion": "Models",
     # Text & translation
     "text-export": "Text & translation", "text-import": "Text & translation",
     "text-roundtrip": "Text & translation", "text-decode": "Text & translation",

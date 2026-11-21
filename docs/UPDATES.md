@@ -5,6 +5,52 @@ to benefit from it. (Same convention as the Xenosaga I kit's
 `docs/UPDATES.md`; this file starts with the first improvement run ported
 back from that project.)
 
+## 2026-11-21 — characters move: `.xap` motion as glTF animations
+
+**What changed.** Episode III motion is decoded. The new `xap.py` is ported
+from the Episode II kit; its docstring lists what changed. Every one of the
+5,039 clips on a disc decodes (715 files, 8,530 slots, 3,491 empty stubs).
+The two USA discs, both Japan discs and the May 2006 prototype give the same
+numbers.
+
+* `model` adds the same-named clips by default: `pac\cf\<stem>.sme` (field),
+  `pac\bat\<stem>.sme` (battle), and a weapon's own clips. That gives 40
+  animations for KOS-MOS (`C3kosmos00`) and 43 for Shion. `--motion
+  PATH[#SLOTS]` picks clips by path, `--matched-only` drops clips whose block
+  counts differ from the skeleton's, and `--no-motion` turns motion off.
+* `models` and browse kind `models` do the same. `models.csv` gains the
+  `motion` and `motion_counts_differ` columns; `models --no-motion` turns
+  motion off.
+* New command `motion`: a file's clip table, one pose per transform, or
+  `--sweep` over the whole disc.
+* `gltf.py` gains Episode II's animation helpers. `xhr.py` keeps the two
+  header fields the parent-scale lookup needs.
+* What Episode III changes compared with Episode II (all read from
+  SLUS_213.89; details in [MOTION.md](MOTION.md)):
+  * clip versions 1.6 and 1.7, with two new header streams at +0x28 and
+    +0x2C;
+  * one root instead of two;
+  * key type 6;
+  * scale thresholds;
+  * new compensation rules (never on run E, and transform 1's rest scale).
+* New front-page GIFs in `docs/images/front/`:
+  * KOS-MOS and Shion walking;
+  * a KOS-MOS battle attack;
+  * a KOS-MOS turntable.
+
+  The render scripts are `docs/gallery/render_motion.py` and
+  `make_gif.py`.
+
+**Checked.** The self-test covers the new rules and a glTF read-back.
+`tools/demo/motion_check.py` samples every frame of the 83 KOS-MOS and Shion
+animations from the `.glb` and compares them with the engine formula (worst
+2.4e-6). The field cycles loop exactly. Blender 5.4 imports every action with
+the clip's frame range. **Not compared with the running game**, and hair
+chains stay stiff (the game simulates them).
+
+**What you do.** Re-run `model` or `models`; the `.glb` files now carry the
+animations. In Blender, set 30 fps before importing.
+
 ## 2026-11-20 (seventh pass) — first PCSX2 boots of discs the kit wrote
 
 Until now nothing written by the kit had been booted. Four USA builds were

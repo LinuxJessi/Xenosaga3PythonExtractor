@@ -32,6 +32,14 @@ files in a dump; textures come from chrtex.py via `pxy.TextureSet`;
 glb files and a `models.csv` are written; `add_commands()` registers
 `model` and `models`; `browse_models()` is the browse hook.  The XS2
 VIF-opcode inventory mode was not carried over.
+
+2026-11-21: motion.  `model` takes `--motion PATH[#SLOTS]` (repeatable),
+`--no-motion` and `--matched-only`; without `--motion` it adds every
+same-stem motion (`xap.same_stem_sources`: pac/cf and pac/bat `.sme`,
+same-stem `.xap`, and a `.wpn`'s own clips).  The sweep (and so browse
+kind "models") does the same and adds the CSV columns `motion` and
+`motion_counts_differ` (as Episode II's browse.py); `--no-motion` on
+`models` turns it off.  The motion decoder is xap.py.
 """
 import csv
 import fnmatch
@@ -50,6 +58,7 @@ if str(HERE) not in sys.path:
 import gltf    # noqa: E402
 import pxy     # noqa: E402
 import vif     # noqa: E402
+import xap     # noqa: E402
 import xcpack  # noqa: E402
 import xhr     # noqa: E402
 
@@ -59,7 +68,7 @@ SECTOR = 2048
 CSV_FIELDS = ["disc", "path", "kind", "status", "layouts", "verts",
               "batch_verts", "tris", "header_tris", "joints", "xhr",
               "textures", "texture_unlinked", "skin_rest_err", "failed",
-              "notes", "glb"]
+              "notes", "motion", "motion_counts_differ", "glb"]
 
 
 def norm_path(path):
@@ -283,6 +292,48 @@ def convert(read, path, have=None, name=None):
     return glb, p, r
 
 
+def add_motion(read, blob, x, path, specs=None, index=None,
+               matched_only=False):
+    """Append motion to a model's .glb (xap.add_to_glb).  `specs`: the
+    --motion strings, else the same-stem motion of `index`
+    (xap.motion_index).  Returns (blob, summary, skipped, notes); summary
+    and skipped as xap.add_to_glb.  Raises xap.XapError when a --motion
+    spec cannot be read."""
+    notes = []
+    if specs:
+        srcs = []
+        for spec in specs:
+            try:
+                srcs.append(xap.load_motion(read, spec))
+            except KeyError as e:
+                raise xap.XapError("%s: %s" % (spec, e))
+    else:
+        srcs, notes = xap.same_stem_sources(read, path, index or {})
+    if not srcs:
+        return blob, [], [], notes
+    blob, summary, skipped = xap.add_to_glb(blob, x, srcs, matched_only)
+    return blob, summary, skipped, notes
+
+
+def motion_text(summary):
+    """(models.csv "motion", "motion_counts_differ") from a summary."""
+    per = {}
+    for sm in summary:
+        src = sm["name"].split("#", 1)[0]
+        per.setdefault(src, []).append(sm)
+    parts = []
+    for src, sms in per.items():
+        odd = [s for s in sms if s["counts_differ"]]
+        t = "%s: %d animations" % (src, len(sms))
+        if odd:
+            t += " (%s)" % ", ".join(
+                "#%s %s" % (s["name"].split("#", 1)[1].split(" ", 1)[0],
+                            xap.mismatch_text(s["counts_differ"]))
+                for s in odd)
+        parts.append(t)
+    return "; ".join(parts), sum(bool(s["counts_differ"]) for s in summary)
+
+
 # -------------------------------------------------------------------- sweep
 
 def glb_names(paths):
@@ -317,13 +368,17 @@ def select(paths, filt=None):
     return sorted(out, key=str.lower)
 
 
-def sweep_one(read, path, have=None, out_file=None, verify=True):
-    """Decode, check, write and read back one model.  Returns a CSV row."""
+def sweep_one(read, path, have=None, out_file=None, verify=True,
+              motion_index=None):
+    """Decode, check, write and read back one model.  Returns a CSV row.
+    `motion_index` (xap.motion_index): add the same-stem motion; None:
+    no motion."""
     kind = path.rsplit(".", 1)[-1].lower()
     row = dict(path=path, kind=kind, status="", layouts="", verts="",
                batch_verts="", tris="", header_tris="", joints="", xhr="",
                textures="", texture_unlinked="", skin_rest_err="",
-               failed="", notes="", glb="")
+               failed="", notes="", motion="", motion_counts_differ="",
+               glb="")
     try:
         p, tex, x, notes = load_model(read, path, have)
     except (pxy.PxyError, vif.VifError, xhr.XhrError, xcpack.XcError,
@@ -406,6 +461,17 @@ def sweep_one(read, path, have=None, out_file=None, verify=True):
             row["status"] = "glb-failed"
             row["failed"] = "; ".join(failed + ["read_glb: %r" % (e,)])
             return row
+    if motion_index is not None and skinned and x is not None:
+        try:                             # never blocks the mesh
+            blob, summ, _, mnotes = add_motion(read, blob, x, path,
+                                               index=motion_index)
+            row["motion"], nd = motion_text(summ)
+            row["motion_counts_differ"] = nd if summ else ""
+            if mnotes:
+                row["notes"] = "; ".join(([row["notes"]] if row["notes"]
+                                          else []) + mnotes)
+        except Exception as e:
+            row["motion"] = "not decoded: %s" % e
     if out_file:
         out_file = Path(out_file)
         out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -419,24 +485,27 @@ def sweep_one(read, path, have=None, out_file=None, verify=True):
 _WORKER = {}
 
 
-def _init_worker(read, have, out_dir, names, verify):
+def _init_worker(read, have, out_dir, names, verify, mindex=None):
     _WORKER.update(read=read, have=have, out_dir=out_dir, names=names,
-                   verify=verify)
+                   verify=verify, mindex=mindex)
 
 
 def _work(path):
     w = _WORKER
     out = Path(w["out_dir"]) / w["names"][path] if w["out_dir"] else None
-    return sweep_one(w["read"], path, w["have"], out, w["verify"])
+    return sweep_one(w["read"], path, w["have"], out, w["verify"],
+                     w.get("mindex"))
 
 
 def sweep(read, paths, out_dir=None, filt=None, jobs=1, verify=True,
-          disc="", log=None):
+          disc="", log=None, motion=True):
     """Sweep every model among `paths` (in-game paths readable by `read`).
-    Writes `<out_dir>/<path>.glb` when out_dir is given.  Returns rows."""
+    Writes `<out_dir>/<path>.glb` when out_dir is given; `motion` adds the
+    same-stem clips (xap.py).  Returns rows."""
     models = select(paths, filt)
     have = set(norm_path(q) for q in paths)
     names = glb_names(models)
+    mindex = xap.motion_index(paths) if motion else None
     rows = []
     if jobs > 1 and len(models) > 1:
         import concurrent.futures as cf
@@ -448,14 +517,14 @@ def sweep(read, paths, out_dir=None, filt=None, jobs=1, verify=True,
     if jobs > 1 and len(models) > 1:
         with cf.ProcessPoolExecutor(jobs, initializer=_init_worker,
                                     initargs=(read, have, out_dir, names,
-                                              verify)) as ex:
+                                              verify, mindex)) as ex:
             for i, row in enumerate(ex.map(_work, models, chunksize=4)):
                 rows.append(row)
                 if log and (i % 100 == 99 or row["status"] != "ok"):
                     log("  [%d/%d] %s %s" % (i + 1, len(models), row["status"],
                                              row["path"]))
     else:
-        _init_worker(read, have, out_dir, names, verify)
+        _init_worker(read, have, out_dir, names, verify, mindex)
         for i, pth in enumerate(models):
             row = _work(pth)
             rows.append(row)
@@ -570,7 +639,6 @@ def _cmd_model(a):
     out = Path(a.out or (a.path.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
                          .rsplit(".", 1)[0] + ".glb"))
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(glb)
     print("%s: pxy %.2f, %d draws, %d triangles (header %d), layouts %s, "
           "%d joint matrices" % (a.path, p.version, len(pxy.all_draws(p)),
                                  r["triangles"], pxy.header_triangles(p),
@@ -580,6 +648,43 @@ def _cmd_model(a):
               % (p.child.name, len(p.child.draws), r["child_triangles"]))
     print("  checks: %s" % ("all pass" if not r["failed"]
                             else "; ".join(r["failed"])))
+    motion = "off" if a.no_motion else "no"
+    if not a.no_motion:
+        _, _, x, _ = load_model(src, a.path, have)
+        skinned = any(b.skin_mode for d in p.draws for b in d.batches)
+        if x is None or not skinned or len(x.joints) < p.n_joint_matrices + 2:
+            motion = "no (no skeleton in the .glb)"
+            if a.motion:
+                print("model: --motion needs a skinned model with its .xhr",
+                      file=sys.stderr)
+                return 2
+        else:
+            try:
+                glb, summ, skipped, notes = add_motion(
+                    src, glb, x, a.path, a.motion,
+                    None if a.motion else xap.motion_index(src.paths),
+                    a.matched_only)
+            except xap.XapError as e:
+                print("model: motion: %s" % e, file=sys.stderr)
+                return 2
+            for n in notes:
+                print("  motion not decoded: %s" % n)
+            for sm in summ:
+                if sm["counts_differ"]:
+                    print("  motion: %s: run counts differ from the "
+                          "skeleton's (clip/xhr); not known to be made for it"
+                          % sm["name"])
+            for sk in skipped:
+                print("  motion: %s left out: run counts differ (clip/xhr "
+                      "%s)" % (sk["name"], xap.mismatch_text(sk["counts"])))
+            differ = sum(bool(sm["counts_differ"]) for sm in summ)
+            motion = "%d animations" % len(summ)
+            if differ:
+                motion += " (%d with run counts that differ, flagged)" % differ
+            if skipped:
+                motion += ", %d left out (run counts differ)" % len(skipped)
+    print("  motion: %s" % motion)
+    out.write_bytes(glb)
     print("wrote %s (%d bytes)" % (out, len(glb)))
     return 0 if not r["failed"] else 1
 
@@ -604,7 +709,7 @@ def _cmd_models(a):
         rows = sweep(src, src.paths, None if a.no_glb else dest,
                      filt=a.filter, jobs=a.jobs or max(1, (os.cpu_count()
                                                            or 2) - 1),
-                     disc=label, log=print)
+                     disc=label, log=print, motion=not a.no_motion)
         report(rows)
         all_rows += rows
     write_csv(all_rows, out / "models.csv")
@@ -626,6 +731,15 @@ def add_commands(subparsers):
     m.add_argument("--path", required=True,
                    help=r"in-game path, e.g. 'mdl\chr\pc\C3kosmos00.chr'")
     m.add_argument("--out", help="output .glb (default: <name>.glb)")
+    m.add_argument("--motion", action="append", metavar="PATH[#SLOTS]",
+                   help=r"motion to add as glTF animations: a .sme / .wpn "
+                   r"package or a .xap / .fap, e.g. 'pac\cf\C3kosmos00.sme#1' "
+                   "(repeatable; default: every same-stem motion)")
+    m.add_argument("--no-motion", action="store_true",
+                   help="mesh and skeleton only")
+    m.add_argument("--matched-only", action="store_true",
+                   help="leave out clips whose run counts differ from the "
+                   "skeleton's")
     m.set_defaults(func=_cmd_model)
     s = subparsers.add_parser(
         "models", help="Every model on a disc -> .glb + models.csv")
@@ -638,6 +752,8 @@ def add_commands(subparsers):
                    help="worker processes (default: CPUs - 1)")
     s.add_argument("--no-glb", action="store_true",
                    help="decode, check and read back, but write no files")
+    s.add_argument("--no-motion", action="store_true",
+                   help="do not add the same-stem motion clips")
     s.set_defaults(func=_cmd_models)
     import blend
     blend.add_commands(subparsers)

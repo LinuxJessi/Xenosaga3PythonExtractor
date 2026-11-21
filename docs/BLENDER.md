@@ -160,8 +160,12 @@ models under `mg1/`) are swept too.
 
 ## What to expect
 
-* **Nothing animates.** The motion files (`.xap`) are not decoded. Bones
-  pose by hand.
+* **Characters move; maps do not.** `model` and `models` add the
+  same-named motion clips (`pac\cf\` field, `pac\bat\` battle, a weapon's
+  own clips) as one action per clip at 30 fps; see [MOTION.md](MOTION.md)
+  for picking an action. Set the scene to 30 fps before importing. Hair
+  and coat chains stay stiff (the game simulates them), and nothing has
+  been compared with the running game yet.
 * **Bones have numbers, not names** (`t00`, `t01`, ...). The skeleton
   files carry no joint names.
 * **Materials are double-sided and character faces follow the normals.**
