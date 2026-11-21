@@ -1,9 +1,13 @@
 # Translating Episode III into another script: Arabic, Hindi, Japanese on the USA disc, and others
 
-> **Not tested in game.** Everything on this page has been checked on disc
-> copies and in previews only. No disc built this way has been booted in
-> PCSX2: no new glyph, no right-to-left line, no executable unlock, no grown
-> text object. Treat the first boot as the real test (§ 6).
+> **Partly tested in game (2026-11-20).** Two USA Disc 1 copies built with
+> `lang import` booted in PCSX2 2.9.175: Arabic (68 new glyphs, joined and
+> right-to-left, in scene dialogue, the synopsis screen and the field menu) and
+> Japanese on the USA disc with `--unlock jp` (donor kana, the USA font's own
+> kanji, and retail Latin-1 such as `®` still drawn right after re-coding).
+> Captures and caveats: [UPDATES.md](UPDATES.md). The images directly below
+> are still kit previews. Not booted: `--extend` (Hindi), `--reclaim-latin`,
+> subtitles in a new script, the Japanese build.
 
 The game draws text one cell at a time, left to right, from a bitmap font
 (`mnu\us\font0.bin` / `font1.bin`, see [FONT.md](FONT.md)). The font has no

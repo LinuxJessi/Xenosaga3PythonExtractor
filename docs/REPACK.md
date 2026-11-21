@@ -159,10 +159,16 @@ source's sha1.
   200 MB pair grow (DVD-5), a Japanese pair grow one sector past DVD-5, the
   shared-sector entry in place.
 
-**Not booted in PCSX2.** In particular, the grow rule (index LBA + sector
-past the last container) is proven in game for Episode I only; for XS3 it is
-reasoned from the reader and checked by re-reading the image, nothing more.
-Same-size in-place patches have been booted before (character recolors).
+**Booted in PCSX2 (2026-11-20), USA Disc 1 only.** A chain-0
+`mnu\us\synopsis.txd` grown from 46,700 to 47,195 bytes (allocation 47,104)
+was appended past the old end of the image on a D1 + D2 pair (Disc 1 padded
+from 1,915,920 to 2,205,080 sectors); the game loaded it from there and showed
+the new text, and the field loaded after it. So the grow rule (index LBA +
+sector past the last container) and the Disc 1 padding hold in PCSX2. Same-size
+in-place text, in-place rewrites within the allocation (398 `.sb` scenes and
+`menutext.txd`) and the fonts plus the patched boot executable also booted
+(UPDATES.md). Not booted: Disc 2, a disc swap, chain-1/chain-2 appends,
+ISO9660-file appends, a real PS2.
 
 ## `repack.py` / `chrtex.py` in place
 

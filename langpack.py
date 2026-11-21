@@ -572,7 +572,9 @@ class Drawable:
                 b = self._jp.encode_char(ch)
             except textcodec.TextError:
                 b = b""
-            if len(b) == 2 and 0xB0 <= b[0] <= 0xCF:
+            if len(b) == 2 and b == b"\xa1\xa1":
+                r = (b, False)                # the full-width space (A1A1, cell 0): no ink to check
+            elif len(b) == 2 and 0xB0 <= b[0] <= 0xCF:
                 cell = self.inked(p.addr, b)
                 if cell is not None and cell >= 1024 and cell not in self.slot_cells \
                         and cell not in p.model.reserved:

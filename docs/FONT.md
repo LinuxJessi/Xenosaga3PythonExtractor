@@ -348,7 +348,7 @@ placed keep their codes; a set made for another build/unlock is refused.
 `GlyphSet.check(addressing, model)` verifies that no slot is reserved and that
 every code draws its cell. Codes are 1 or 2 bytes, saved as hex in the json.
 
-### Unlocks (`UNLOCKS`, `apply_patches`, `glyphs-unlock`) — NOT tested in game
+### Unlocks (`UNLOCKS`, `apply_patches`, `glyphs-unlock`) — `jp` booted in PCSX2 (USA Disc 1, 2026-11-20; `jp-gate` / `jp-prop` alone not booted)
 
 Patch descriptors (VA, old bytes, new bytes) for the USA / prototype
 executable (the words also live in `font.UNLOCK_SITES`). Every old word is
