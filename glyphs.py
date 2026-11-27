@@ -92,6 +92,10 @@ from font import (CELL_H, CELL_W, CELL_COUNT, EXTRA_KANJI_BASE, FALLBACK_CELL, F
                   FIXED_FLAG, PROP_CELL_SHIFT, PROP_LIMIT, Addressing, Font, FontError, half_cell)
 
 
+# first cell above the row-formula codes: CF FE -> 207*94 + 254 - 0x3D41 = 4031
+UNLOCKED_EXTRA_END = 0xCF * 94 + 0xFE - 0x3D41 + 1
+
+
 class GlyphError(ValueError):
     pass
 
@@ -539,7 +543,12 @@ def build_model(a: Addressing, retail: Iterable[int], font: Optional[Font] = Non
         reserved.add(c)
         reserved.add(fontmod.cell_index(half_cell(c)))
     reserved.update(PROP_IMAGES)
-    reserved.update(range(EXTRA_KANJI_BASE, CELL_COUNT))
+    # the extra-kanji cells 3989+ are what lead bytes >= D0 reach through the extra
+    # lists (FUN_00181d40). Under an unlock of the USA executable no text the kit
+    # writes has such a lead (the re-encode turns Latin-1 singles into A5 pairs, and
+    # new letters never get D0+ codes), and cells 3989-4031 also have plain B0-CF row
+    # codes (CF D4-FE), so they are free; 4032+ have no EUC code and stay reserved.
+    reserved.update(range(EXTRA_KANJI_BASE if unlock == "none" else UNLOCKED_EXTRA_END, CELL_COUNT))
     if font is not None:
         reserved.update(c for c in range(a.prop_cells, PROP_LIMIT)
                         if any(any(r) for r in font.cell(c + PROP_CELL_SHIFT)))
@@ -608,7 +617,7 @@ class GlyphSet:
         self.glyphs[g.key] = g
 
     def allocate(self, order: Sequence[str], model: SlotModel, prop_only: bool = False,
-                 wide_only: bool = False) -> None:
+                 wide_only: bool = False, prop_wide: bool = False) -> None:
         """Give every key in ``order`` (most frequent first) a slot: free
         proportional cells first (ink up to 18 px wide), then wide cells. Keys
         already placed keep their place; the result depends only on ``order``,
@@ -637,6 +646,11 @@ class GlyphSet:
             elif not prop_only and free_wide:
                 c = free_wide.pop(0)
                 self.slots[key] = {"tier": "wide", "cell": c, "code": model.code_for(c), "left": 0, "right": 19}
+                if prop_wide and g.bounds:
+                    # a letter of a proportional script in a fixed-width cell: drawn at the
+                    # cell's left like a proportional image, and given its own advance by
+                    # the encoder with $xx7 (pw = "proportional in a wide cell")
+                    self.slots[key].update(self._wide_prop_metrics(g), pw=True)
             else:
                 raise GlyphError(f"out of font cells at key {key!r} ({len(self.slots)} placed)")
 
@@ -652,9 +666,25 @@ class GlyphSet:
         shift = 1 - left if left < 1 else 0
         return 1 if shift else left, min(19, right + shift)
 
+    @staticmethod
+    def _wide_prop_metrics(g: Glyph) -> dict:
+        """(left, right) for a proportional letter placed in a wide cell. The printer
+        draws a fixed cell's columns 0-18 only (FUN_00184188: the quad is the advance,
+        19 px), so ink starts at column 1, or at column 0 when it is 19-20 wide (then
+        cut to 19 columns)."""
+        w = min(g.ink_width, 19)
+        return {"left": 1, "right": w} if w <= 18 else {"left": 0, "right": w - 1}
+
     def width(self, key: str) -> int:
         s = self.slots[key]
-        return s["right"] - s["left"] + 3 if s["tier"] == "prop" else FIXED_ADVANCE
+        if s["tier"] == "prop" or s.get("pw"):
+            return s["right"] - s["left"] + 3 if s["left"] else s["right"] + 2   # FUN_00185770
+        return FIXED_ADVANCE
+
+    def xx7(self, key: str) -> int:
+        """The $xx7 a pw letter needs so the pen moves by its own width, not 19."""
+        s = self.slots.get(key)
+        return self.width(key) - FIXED_ADVANCE if s and s.get("pw") else 0
 
     # applying
     def apply(self, font: Font) -> None:
@@ -669,6 +699,9 @@ class GlyphSet:
                 aligned = shift_x(bm, s["left"] - g.bounds[0]) if g.bounds and g.bounds[0] != s["left"] else bm
                 font.set_cell(s["cell"] + PROP_CELL_SHIFT, aligned)
                 font.set_metrics(s["cell"], s["left"], s["right"])
+            if s.get("pw") and g.bounds:
+                font.set_cell(s["cell"], shift_x(bm, s["left"] - g.bounds[0]))
+                continue
             font.set_cell(s["cell"], centred)
 
     # persistence

@@ -95,7 +95,7 @@ import sys
 import unicodedata
 from collections import Counter
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -121,6 +121,9 @@ _BRACKET_ALT = {"\u232a": "\u3009", "\u3009": "\u232a"}
 MIRROR = dict(_OPEN, **_CLOSE)
 MIRROR.update({"<": ">", ">": "<", "«": "»", "»": "«", "‹": "›", "›": "‹", "≤": "≥", "≥": "≤"})
 PACK_CFG = "langpack.json"
+# scripts whose letters are drawn full width at a fixed pitch (no $xx7 correction)
+FIXED_PITCH_SCRIPTS = ("Hani", "Hans", "Hant", "Jpan", "Hira", "Kana", "Hang", "Kore", "Bopo", "Yiii")
+
 STATES = {"prop1han1": (True, True), "prop0han1": (False, True), "prop1han0": (True, False),
           "prop0han0": (False, False)}
 _ESC1 = re.compile(r"⟦([0-9A-Fa-f]{2})⟧")
@@ -1358,11 +1361,28 @@ class Encoder:
                     s = "".join(MIRROR.get(c, c) for c in s[::-1])
                 out.append(self.native_text(s))
             else:
-                out.append("".join(self._code_text(k) for k in it.payload))
+                out.append(self._keys_text(it.payload))
         text = "".join(out)
         if self.width and self.align == "right" and base_rtl and line_w < self.width:
             text = " " * ((self.width - line_w) // max(1, self.space_px)) + text
         return text
+
+    def _keys_text(self, keys: Sequence[str]) -> str:
+        """The codes of a run of keys. A letter of a proportional script in a
+        fixed-width cell (a pw slot) gets ``$xx7,N;`` before it, so the printer and
+        the width function (both add xx7 to each character's advance, FUN_00184188 /
+        FUN_001828a0) move the pen by its own width; xx7 is a global, so it is set
+        back to 0 at the end of the run."""
+        out, cur = [], 0
+        for k in keys:
+            d = self.gs.xx7(k) if k in self.gs.slots else 0
+            if d != cur:
+                out.append(f"$xx7,{d};")
+                cur = d
+            out.append(self._code_text(k))
+        if cur:
+            out.append("$xx7,0;")
+        return "".join(out)
 
     def _code_text(self, key: str) -> str:
         if key not in self.gs.slots:
@@ -1624,6 +1644,28 @@ def verify_reencode(old_tree: Path, new_tree: Path, pack: Pack) -> Tuple[int, in
     return n, recoded, bad
 
 
+def _tree_cells(tree: Path, reg, a: Addressing) -> Set[int]:
+    """Every cell the display strings of a (not yet encoded) tree draw on the retail
+    addressing ``a``."""
+    codec = textcodec.for_region(reg)
+    disp = reg.codec
+    out: Set[int] = set()
+    m = _load_manifest(tree)
+    for path, o in m["objects"].items():
+        text = (tree / o["tree"]).read_text(encoding="utf-8-sig")
+        bodies: List[str] = []
+        if o["kind"] in BLOCK_KINDS:
+            transform_block_file(text, _block_codecs(o, disp), disp, lambda b, w: bodies.append(b) or b)
+        elif o["kind"] == "subtitle" and o.get("codec") == disp:
+            transform_whole_file(text, o.get("role", ""), lambda b: bodies.append(b) or b)
+        for b in bodies:
+            try:
+                out.update(cells_of(a, codec.from_text(b)))
+            except (textcodec.TextError, FontError, IndexError):
+                continue
+    return out
+
+
 def reclaim_check(tree: Path, pack: Pack) -> List[str]:
     """Display strings of an (encoded) tree that still draw a reclaimed cell."""
     if not pack.reclaimed:
@@ -1687,6 +1729,11 @@ def scan(iso, tree, out, ttf: Optional[str] = None, px: float = 20.0, baseline: 
         han_cells = {fontmod.cell_index(a.cell(a.han_code(b) >> 8, a.han_code(b) & 0xFF, 0))
                      for b in range(0x20, 0x80)}
         reclaimed = {c for c in reserved if 256 <= c < 384 and c not in han_cells}
+        if reclaim_latin == "unused":
+            # only the cells no display string of THIS tree draws (the translation in
+            # it included): untranslated English with é, ® ... keeps its letters, and
+            # encode's reclaim check passes by construction
+            reclaimed -= _tree_cells(Path(tree), reg, a)
         reserved -= reclaimed
     import hashlib
     model = glyphmod.build_model(a, reserved, retail_fonts[0], unlock, None, hashlib.sha1(exe).hexdigest())
@@ -1760,7 +1807,11 @@ def scan(iso, tree, out, ttf: Optional[str] = None, px: float = 20.0, baseline: 
                     and g.advance_hint and g.advance_hint <= 20:
                 widened[k] = g.bounds
                 g.bounds = (g.bounds[0], g.bounds[0] + 17)
-    gs.allocate(order, model, prop_only=prop_only, wide_only=wide_only)
+    # letters of a proportional script that land in fixed-width cells keep their own
+    # width (GlyphSet pw slots + $xx7 from the encoder); Han, kana and Hangul are
+    # full-width letters and stay centred at 19 px
+    gs.allocate(order, model, prop_only=prop_only, wide_only=wide_only,
+                prop_wide=(script or "") not in FIXED_PITCH_SCRIPTS and donor is None)
     for k, b in widened.items():
         gs.glyphs[k].bounds = b
     if spacing == "font":
@@ -1810,7 +1861,7 @@ def set_font_spacing(gs: GlyphSet, keys: Iterable[str]) -> int:
     for k in keys:
         s = gs.slots[k]
         g = gs.glyphs.get(k)
-        if s["tier"] != "prop" or g is None or not g.advance_hint or g.bounds is None:
+        if not (s["tier"] == "prop" or s.get("pw")) or g is None or not g.advance_hint or g.bounds is None:
             continue
         s["left"], s["right"], s["spacing"] = 1, max(1, min(19, int(g.advance_hint) - 2)), "font"
         n += 1
@@ -1821,7 +1872,12 @@ def apply_spacing(gs: GlyphSet, f: Font) -> None:
     """After ``GlyphSet.apply``: the unshifted raster of every ``spacing: font`` slot
     at cell + 0x240, with its metric pair."""
     for k, s in gs.slots.items():
-        if s.get("spacing") == "font":
+        if s.get("spacing") == "font" and s.get("pw"):
+            # a wide cell is drawn at the pen itself (no image at +0x240, no metric
+            # pair): the raster's origin at column 1 lands where a proportional
+            # image's would (pen + 1 - left, left = 1)
+            f.set_cell(s["cell"], gs.glyphs[k].bitmap)
+        elif s.get("spacing") == "font":
             f.set_cell(s["cell"] + fontmod.PROP_CELL_SHIFT, gs.glyphs[k].bitmap)
             f.set_metrics(s["cell"], s["left"], s["right"])
 
@@ -1906,7 +1962,7 @@ def render_bytes(addr: Addressing, fnt: Font, data: bytes, prop: bool = True, ha
     starts one pixel after the pen, advance ``right - left + 3`` (FUN_00185770).
     ASCII without ``$han`` advances 16 px blank. Returns (24 rows, width)."""
     flags = (1 if prop else 0) | (2 if han else 0)
-    pen = 0
+    pen, xx7 = 0, 0
     draws: List[Tuple[int, int]] = []
     i, n = 0, len(data)
     while i < n and data[i] != 0:
@@ -1922,6 +1978,11 @@ def render_bytes(addr: Addressing, fnt: Font, data: bytes, prop: bool = True, ha
                 flags = (flags & ~1) | (data[i + 5] & 1)
             elif name == "han" and i + 4 < n:
                 flags = (flags & ~2) | ((data[i + 4] & 1) << 1)
+            elif name == "xx" and data.startswith(b"$xx7,", i):
+                try:
+                    xx7 = int(data[i + 5:data.index(b";", i)])
+                except ValueError:
+                    pass
             if name == "ruby" and data[i:i + 7] == b"$rubys;":
                 j = data.find(b"$rubyb;", i)
                 k = data.find(b"$rubye;", i)
@@ -1956,10 +2017,10 @@ def render_bytes(addr: Addressing, fnt: Font, data: bytes, prop: bool = True, ha
                 pen += addr.glyph_width(0, fnt.metrics)
                 continue
             draws.append((ci + fontmod.PROP_CELL_SHIFT, pen + 1 - left if left else pen))
-            pen += addr.glyph_width(ci, fnt.metrics)
+            pen += addr.glyph_width(ci, fnt.metrics) + xx7
         else:
             draws.append((ci, pen))
-            pen += FIXED_ADVANCE
+            pen += FIXED_ADVANCE + xx7
     W = max([pen + 2] + [d[1] + fontmod.CELL_W for d in draws if d[0] != -1]
             + [d[1] + len(d[2][0]) for d in draws if d[0] == -1])
     img = [[0] * W for _ in range(fontmod.CELL_H)]

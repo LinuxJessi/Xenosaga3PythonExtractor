@@ -385,6 +385,32 @@ def exe_sha256(x) -> Optional[str]:
     return _SHA_CACHE[key]
 
 
+_BASE_CACHE: Dict[Tuple[str, str], Optional[str]] = {}
+
+
+def _unlocked_base_sha256(iso) -> Optional[str]:
+    """sha256 of the boot executable with the kit's glyphs unlock words put back
+    (font.UNLOCK_SITES: VA, retail word, unlocked word), or None when none of
+    them is applied. A disc the translation editor built with the kanji rows
+    opened (txtarget.scan_fitting) is still the USA build: its other bytes are
+    the retail ones, and every address of the profile holds."""
+    name = iso.boot_elf_name()
+    key = (str(getattr(iso, "path", id(iso))), name)
+    if key in _BASE_CACHE:
+        return _BASE_CACHE[key]
+    out = None
+    try:
+        import font as fontmod
+        exe = executable(iso)[1]
+        base = fontmod.unpatched(exe)
+        if base != exe:
+            out = hashlib.sha256(base).hexdigest()
+    except Exception:                                   # noqa: BLE001 - not an unlocked retail exe
+        out = None
+    _BASE_CACHE[key] = out
+    return out
+
+
 def region_of(x) -> Region:
     """The profile of an image (IsoImage or Disc): serial and executable hash must both
     match a verified profile. Anything else is "unknown": it can be listed, dumped and
@@ -395,6 +421,10 @@ def region_of(x) -> Region:
     for p in PROFILES:
         if serial in p.serials and sha == p.exe_sha256:
             return p
+    base = _unlocked_base_sha256(iso) if serial else None
+    for p in PROFILES:
+        if base and serial in p.serials and base == p.exe_sha256:
+            return p          # the retail executable with the kit's glyphs unlock (glyphs.UNLOCKS)
     for p in PLACEHOLDERS:
         if serial in p.serials:
             try:

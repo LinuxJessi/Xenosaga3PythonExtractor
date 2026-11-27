@@ -25,7 +25,8 @@ under it: the kit's text pipeline (`textpack`, `textcodec`, `langpack`,
 > dialogue box; the Chinese build again on 2026-11-27 after the glyph-size
 > fix). On 2026-11-27, French on the Settings menu (heading, rows, values,
 > help lines, button hints) and Spanish in the opening caption and the first
-> scene's dialogue (¿, á, é, í, ú) followed. Everything else below comes from the kit's own tests on the real discs
+> scene's dialogue (¿, á, é, í, ú) followed, and Korean with 234 syllables,
+> past the font's free cells (see [Room for new letters](#room-for-new-letters-the-kanji-rows)). Everything else below comes from the kit's own tests on the real discs
 > (USA Disc 1 + 2 and Japan Disc 1 + 2): rows read, builds written to clones,
 > the clones read back. Not booted yet: battle text, Disc 2 and the Japanese
 > discs. The page was walked
@@ -424,6 +425,87 @@ A project that still says `"kind": "builtin"` for such a language (made
 before this, or on another build) is treated as the language really is.
 
 Languages of another script are not given a font this way.
+
+### Room for new letters: the kanji rows
+
+Every new letter takes a cell in the game's font. The USA executable leaves
+**174 cells free** (123 proportional and 51 wide on USA Disc 1). That is
+plenty for most languages:
+
+* Latin with a few extra letters, Cyrillic, Greek, Armenian, Georgian, Hebrew,
+  Thai and Cherokee all fit.
+* Arabic usually fits, since its joined forms take one cell each.
+
+Languages with large writing systems need far more. A whole-game translation
+needs well over 174 different letters in:
+
+* Korean (around 2,000 Hangul syllables);
+* Chinese (3,000 characters or more);
+* Japanese on the USA discs;
+* Amharic and other Ethiopic languages;
+* Indic scripts with many conjuncts.
+
+When the letters don't fit, **the build opens the font's kanji rows**. It
+patches four words of the pair-gate function (FUN_00181e48) in the boot
+executable of both discs so that it reads the way the Japanese release's
+does (`glyphs.UNLOCKS["jp-gate"]`). That gives **193 proportional and 3,192
+wide cells**: the 3,149 kanji-row cells, plus the 43 extra-kanji cells
+3989-4031. Those are reachable by plain row codes (CF D4-FE), and no USA
+text uses the extra lists. That is room for a full Korean translation.
+
+If a project still has more letters than that (a whole game in Chinese can
+use 3,500 characters), the build takes a third step. It also uses the
+accented-letter cells (256-383) that no line of the project still draws:
+41 of them on USA Disc 1 even with every line still in English, and up to
+68 once the English is all translated. Untranslated lines keep their é
+and ®, because a cell that any of them draws is never taken. In total that
+is up to about 3,450 cells.
+
+The cost is small. Under the Japanese gate, the USA single bytes 0xA0-0xFF
+start a two-byte code, so the build re-encodes every English string that uses
+one of them: é, ä, â, ®, ö, ß and the like. On USA Disc 1 that is 123
+visible lines in 30 objects. The build log says when it happens, and *Check
+project* says beforehand when a project has more new letters than free cells.
+
+To refuse the unlock, a project can pin `"unlock": "none"` in its target. The
+build then stops with "out of font cells" instead. Japan discs have no unlock
+to offer: their gate is already the Japanese one, and their free cells are the
+blank cells of the Japanese font.
+
+**Spacing in fixed-width cells.** The kanji cells are fixed-width: the
+game advances 19 px after each one. CJK characters are meant to be that
+wide, but a Devanagari or Arabic letter placed there would leave gaps. So for
+any script other than Han, kana, Hangul, Bopomofo and Yi, the build:
+
+* draws the letter at the cell's left edge, where a proportional letter's
+  image would be;
+* writes `$xx7,N;` before it, the game's own signed per-letter spacing (the
+  game uses `$xx7,-1;` itself), so that the pen moves by the letter's real
+  width;
+* writes `$xx7,0;` after the run.
+
+Both the printer (FUN_00184188) and the width function (FUN_001828a0) add
+`xx7` to every letter's advance, so the editor's width guide still measures
+the line correctly.
+
+Rendered by the kit, a Hindi and an Arabic line came out pixel for pixel the
+same with every letter forced into fixed-width cells as with proportional
+cells. Booted in PCSX2, the Hindi first-scene line is the same width as the
+2026-11-21 proportional build. The cost is about 8 bytes per letter. That
+only applies to the rarest letters, because the most frequent ones get the
+proportional cells first.
+
+Tested in the game on 2026-11-27 (PCSX2, USA Disc 1):
+
+* A Korean project with 234 different syllables (193 proportional + 41
+  wide cells) showed the Settings menu, the opening caption and the first
+  scene's dialogue in Korean.
+* An untranslated English help line in the same menu still drew its
+  "DUALSHOCK®2" correctly after the re-encoding.
+
+The editor's read-back of such a build compares every written object byte
+for byte and checks the copies' executables. It doesn't parse them again,
+because its readers know only the retail gate.
 
 ## The cache
 

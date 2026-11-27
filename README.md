@@ -62,8 +62,9 @@ Play Episode III in your own language. Open the translation editor, pick
 your discs and a language, and type. Press **Build** and you get patched
 copies of Disc 1 and Disc 2 that boot like the originals. The editor knows
 382 languages and adds the few letters French or German need. It can also
-draw whole new alphabets (Arabic, Devanagari, Cherokee, Chinese…) into the
-game's own font. Translators can download it on its own.
+draw whole new alphabets (Arabic, Devanagari, Cherokee, Chinese, Korean…)
+into the game's own font. For large alphabets it opens the font's kanji
+rows, which hold thousands of letters. Translators can download it on its own.
 **[See the langkit tour: docs/LANGKIT.md](docs/LANGKIT.md)**
 
 <table>
@@ -226,7 +227,7 @@ three letters the USA font lacks (`œ Œ Ÿ`) are added from a font that ships
 with the kit. Dialogue has a width guide read from the game's window code
 (the game never wraps; 469 px keeps a window on the 512 px screen), and
 *Wrap to fit* breaks lines to it. Its builds have been played in PCSX2 in
-French, Spanish, Hindi, Chinese, Cherokee and Arabic
+French, Spanish, Korean, Hindi, Chinese, Cherokee and Arabic
 ([docs/LANGKIT.md](docs/LANGKIT.md)).
 [docs/TRANSLATION-EDITOR.md](docs/TRANSLATION-EDITOR.md).
 

@@ -5,6 +5,38 @@ to benefit from it. (Same convention as the Xenosaga I kit's
 `docs/UPDATES.md`; this file starts with the first improvement run ported
 back from that project.)
 
+## 2026-11-27 — Room for Korean, Chinese and other large alphabets
+
+* **New letters no longer run out at 174.** The USA executable has 174 free
+  font cells. A whole-game translation into Korean, Chinese, Japanese,
+  Amharic or an Indic script needs far more. When a project's letters don't
+  fit, the editor's build now opens the font's kanji rows: the `jp-gate`
+  unlock, four words of the pair gate, patched on both discs. That gives 193
+  proportional and 3,149 wide cells.
+* The cost: English strings that use the single bytes 0xA0-0xFF (é, ä, ®…;
+  123 visible lines in 30 objects on USA Disc 1) are re-encoded for the new
+  gate.
+* *Check project* says in advance when a project will need the unlock, and
+  a project can pin `"unlock": "none"` to refuse it.
+* `region.region_of` recognises a retail executable that carries the kit's
+  unlock, so the kit's other readers still know the disc.
+* Tested in PCSX2 with a 234-syllable Korean project: the Settings menu, the
+  opening caption and the first scene drew in Korean, and an untranslated
+  "DUALSHOCK®2" line was still right.
+* More room under the unlock:
+  * the 43 extra-kanji cells 3989-4031 are free (3,192 wide cells, up from
+    3,149);
+  * if a project still overflows (a whole game in Chinese), the build also
+    takes the accented-letter cells no line of the project draws any more
+    (41 to 68 on USA Disc 1; `langpack.scan(reclaim_latin="unused")`).
+* **Natural spacing in fixed-width cells.** Hindi, Arabic and other
+  proportional letters that land in the kanji cells are drawn at the cell's
+  left edge and given their own width with the game's `$xx7` spacing code,
+  so they no longer advance a fixed 19 px. The rendering is pixel-identical
+  to proportional cells, and a forced-wide Hindi build looked the same in
+  PCSX2.
+* *To benefit:* nothing to do; the build decides.
+
 ## 2026-11-27 — Chinese, Japanese and Korean glyphs fit the cell; the langkit page
 
 * **No more thin lines between Chinese characters.** New-script Han, kana

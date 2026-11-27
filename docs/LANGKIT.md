@@ -51,6 +51,29 @@ Chinese characters are sized like the Japanese release's kanji.
 | ![Arabic in the first dialogue box, joined and right to left](images/editor/xs3-ingame-editor-arabic-dialogue.jpg) | ![Cherokee syllabary in the first dialogue box](images/editor/xs3-ingame-editor-cherokee-dialogue.jpg) |
 | *Arabic, joined and right to left* | *Cherokee syllabary* |
 
+### Room for large alphabets
+
+Korean, Chinese, Japanese, Amharic and the Indic scripts need thousands of
+letters for a whole game. The game's font has 174 free cells as shipped.
+When a project needs more, the build opens the font's kanji rows, the same
+way the Japanese release reads its text, which gives about 3,400 cells.
+For a whole game in Chinese, it can also reuse accented-letter cells that
+no line of the project still draws. Letters of scripts like Hindi or Arabic
+that land in the fixed-width kanji cells keep their natural spacing. The
+build patches the game on both discs to do this and re-encodes the few
+English lines with é, ® and the like to match. You don't need to do
+anything: *Check project* tells you ahead of time, and the build log
+confirms it.
+
+| | |
+|---|---|
+| ![The Settings menu in Korean: 환경 설정, 음성 출력, 자막, 진동 기능, 화면 조정](images/editor/xs3-ingame-editor-korean-settings.jpg) | ![Blue Testament in Korean: three lines in the first dialogue box](images/editor/xs3-ingame-editor-korean-dialogue.jpg) |
+| *Korean menus, with the kanji rows opened (234 syllables)* | *Korean dialogue in the opening scene* |
+
+English lines you haven't translated yet stay right, symbols included:
+
+![The Korean Settings menu with an untranslated English help line: "Set analog controller (DUALSHOCK®2) vibration."](images/editor/xs3-ingame-editor-korean-settings-english-line.jpg)
+
 There are more captures on the
 [front page](../README.md#translating-into-another-alphabet), made with the
 command-line tools: Amharic, Georgian, Japanese on the USA disc, and Hindi
@@ -147,7 +170,8 @@ that the editor refuses lines the game could not draw. To run them on your
 own discs, use `python cli.py tx-selftest --iso DISC1.iso`.
 
 In the game, the editor's builds have shown French menus, Spanish cutscenes,
-and Hindi, Chinese, Cherokee and Arabic dialogue. All of these were on USA
+Korean menus and dialogue with the kanji rows opened, and Hindi, Chinese,
+Cherokee and Arabic dialogue. All of these were on USA
 Disc 1 (the captures above). Next on the list are battles, Disc 2 and the
 disc swap, and the Japanese discs. Boot your build in an emulator before you
 share it, and please tell us what you find:

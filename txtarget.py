@@ -583,6 +583,8 @@ def resolve_target(project: dict) -> dict:
          "align": given.get("align", "left"), "wrap": given.get("wrap"),
          "name": prof.get("name") or code or "?",
          "lacking": prof.get("lacking", "") if kind == "script-hybrid" else ""}
+    if given.get("unlock"):
+        t["unlock"] = given["unlock"]                # pinned (see scan_fitting); otherwise as needed
     t["battle_font"] = given.get("battle_font", t["font"])
     t["battle_face"] = given.get("battle_face", t["face"] if "battle_font" not in given else 0)
     for k, v in BATTLE_RENDER.items():
@@ -1171,12 +1173,63 @@ def sync_keywords(enc: Path, state, edits: Dict[str, str]) -> int:
     return n
 
 
-def scan_args(target: dict) -> dict:
+# When a language needs more new letters than the USA executable has free cells
+# for (123 proportional + 51 wide on USA Disc 1), the build opens the kanji rows:
+# glyphs.UNLOCKS "jp-gate" makes the pair gate the Japanese one, which reaches
+# cells 1024-3988 (free on USA Disc 1: 193 proportional + 3,149 wide). Its cost is
+# that the USA Latin-1 single bytes 0xA0-0xFF become lead bytes, so the build
+# re-encodes every string that uses one (123 visible rows in 30 objects on USA
+# Disc 1: é, ä, ®...); langpack.encode does that over the whole tree. "jp" (gate +
+# the Japanese proportional range) is not used: it leaves 72 proportional cells.
+AUTO_UNLOCK = "jp-gate"
+
+
+def scan_args(target: dict, unlock: str = "none") -> dict:
     """``langpack.scan`` keyword arguments of a resolved target."""
     return {"ttf": target.get("font") or None, "px": float(target.get("px") or 20.0),
             "baseline": int(target.get("baseline") or 17), "face": int(target.get("face") or 0),
             "script": target.get("script") or None,
-            "language": (target.get("language") or None), "rtl": bool(target.get("rtl"))}
+            "language": (target.get("language") or None), "rtl": bool(target.get("rtl")),
+            "unlock": unlock}
+
+
+def scan_fitting(langpack, iso: str, tree: Path, pack: Path, target: dict, log) -> str:
+    """``langpack.scan`` with the executable as it is; when the letters do not fit
+    its free cells and the build has an unlock to offer (USA and prototype
+    executables), again with the kanji rows opened (AUTO_UNLOCK). A project may
+    pin ``"unlock"`` in its target ("none" refuses the unlock). Returns the
+    unlock used."""
+    import shutil
+    import glyphs as glyphmod
+    pinned = target.get("unlock")
+    first = pinned if pinned in glyphmod.UNLOCK_MODES else "none"
+    try:
+        langpack.scan(iso, tree, pack, log=log, **scan_args(target, first))
+        return first
+    except glyphmod.GlyphError as exc:
+        if "out of font cells" not in str(exc) or first != "none" or pinned == "none":
+            raise
+        addr = tc.context(iso).addr
+        if addr.gate != "whitelist":
+            raise TargetError(f"{exc}: this build's free font cells are all taken, and it has no "
+                              f"unlock to open more (only the USA and prototype executables do)") from None
+    log(f"the new letters do not fit the executable's free font cells: opening the kanji rows "
+        f"(executable unlock {AUTO_UNLOCK}: thousands of cells; English text that uses "
+        f"é, ä, ® and the like is re-encoded for it)")
+    shutil.rmtree(pack, ignore_errors=True)
+    try:
+        langpack.scan(iso, tree, pack, log=log, **scan_args(target, AUTO_UNLOCK))
+        return AUTO_UNLOCK
+    except glyphmod.GlyphError as exc:
+        if "out of font cells" not in str(exc):
+            raise
+    # still too many (a whole game in Chinese can need 3,500+): also take the
+    # Latin-1 cells (256-383) that no string of this project draws any more
+    log("still more letters than cells: also using the accented-letter cells that no line of "
+        "this project draws any more")
+    shutil.rmtree(pack, ignore_errors=True)
+    langpack.scan(iso, tree, pack, log=log, reclaim_latin="unused", **scan_args(target, AUTO_UNLOCK))
+    return AUTO_UNLOCK
 
 
 def build_script(isos: List[str], state, target: dict, edits: Dict[str, str], out, work: Path,
@@ -1184,6 +1237,7 @@ def build_script(isos: List[str], state, target: dict, edits: Dict[str, str], ou
     """Build a project whose language needs new letters: export, write the
     translations in, ``lang scan`` / ``encode`` / ``import`` (module docstring).
     Returns langpack.import_pack's result plus the tree and pack folders."""
+    import glyphs as glyphmod
     import langpack
     import textpack
     glyph = coverage([t for rid, t in edits.items() if state.by_id.get(rid, {}).get("font") == tc.FIELD],
@@ -1217,7 +1271,7 @@ def build_script(isos: List[str], state, target: dict, edits: Dict[str, str], ou
     try:
         log(f"drawing new letters from {Path(target['font']).name} ({target.get('script') or 'script'}, "
             f"{target.get('px')} px)")
-        langpack.scan(isos[0], tree, pack, log=log, **scan_args(target))
+        unlock = scan_fitting(langpack, isos[0], tree, pack, target, log)
         width = int(target.get("wrap") or 0)
         langpack.encode(tree, pack, enc, width=width, align=target.get("align") or "left",
                         rtl=bool(target.get("rtl")), log=log)
@@ -1232,10 +1286,11 @@ def build_script(isos: List[str], state, target: dict, edits: Dict[str, str], ou
             raise TargetError(f"{len(bad)} problem(s) in the encoded text; nothing written:\n  " + "\n  ".join(bad[:20]))
         res = langpack.import_pack(list(isos), enc, pack, out, grow=True, dry_run=dry_run, log=log,
                                    overwrite=overwrite)
-    except (langpack.LangError, textpack.TextError) as exc:
+    except (langpack.LangError, textpack.TextError, glyphmod.GlyphError) as exc:
         raise TargetError(str(exc)) from None
     res["tree"], res["pack"], res["enc"] = str(tree), str(pack), str(enc)
     res["target"] = target
+    res["unlock"] = unlock
     return res
 
 
@@ -1357,6 +1412,58 @@ def selftest(iso: Optional[str], out: Optional[str] = None) -> int:
           and "<" not in cov["native"] + cov["glyph"],
           f"coverage: Polish letters need glyphs ({cov['glyph']}), tags are not counted")
     check(coverage("Ж", "builtin")["impossible"] == "Ж", "a builtin target cannot draw a foreign letter")
+    # too many new letters for the free cells: the scan is redone with the kanji rows open
+    import glyphs as _gm
+    import types
+
+    class _FakeLp:
+        calls: List[str] = []
+
+        @staticmethod
+        def scan(iso, tree, pack, log=None, unlock="none", **kw):
+            _FakeLp.calls.append(unlock)
+            if unlock == "none":
+                raise _gm.GlyphError("out of font cells at key 'u:가' (174 placed)")
+    _ctx = tc.context
+    tc.context = lambda iso=None: types.SimpleNamespace(addr=types.SimpleNamespace(gate="whitelist"))
+    try:
+        tmpd = Path(os.environ.get("TMPDIR", "/tmp"))
+        used = scan_fitting(_FakeLp, "x.iso", tmpd, tmpd / "xs3-nonexistent-pack", {"script": "Hang"},
+                            lambda *a: None)
+        check(used == AUTO_UNLOCK and _FakeLp.calls == ["none", AUTO_UNLOCK],
+              f"letters past the free cells: the scan is redone with unlock {AUTO_UNLOCK} ({_FakeLp.calls})")
+        _FakeLp.calls = []
+        try:
+            scan_fitting(_FakeLp, "x.iso", tmpd, tmpd / "xs3-nonexistent-pack", {"unlock": "none"},
+                         lambda *a: None)
+            pinned_ok = False
+        except _gm.GlyphError:
+            pinned_ok = _FakeLp.calls == ["none"]
+        check(pinned_ok, "a project that pins unlock none is refused, not unlocked")
+
+        class _FakeLp2:
+            calls: List[tuple] = []
+
+            @staticmethod
+            def scan(iso, tree, pack, log=None, unlock="none", reclaim_latin=False, **kw):
+                _FakeLp2.calls.append((unlock, reclaim_latin))
+                if not reclaim_latin:
+                    raise _gm.GlyphError("out of font cells at key 'u:龍' (3385 placed)")
+        used = scan_fitting(_FakeLp2, "x.iso", tmpd, tmpd / "xs3-nonexistent-pack", {"script": "Hani"},
+                            lambda *a: None)
+        check(used == AUTO_UNLOCK and _FakeLp2.calls == [("none", False), (AUTO_UNLOCK, False),
+                                                          (AUTO_UNLOCK, "unused")],
+              f"still too many after the unlock: the unused accented-letter cells are taken too ({_FakeLp2.calls})")
+        tc.context = lambda iso=None: types.SimpleNamespace(addr=types.SimpleNamespace(gate="euc"))
+        _FakeLp.calls = []
+        try:
+            scan_fitting(_FakeLp, "x.iso", tmpd, tmpd / "xs3-nonexistent-pack", {}, lambda *a: None)
+            jp_ok = False
+        except TargetError as e:
+            jp_ok = "no unlock" in str(e)
+        check(jp_ok, "a Japan-disc build out of cells says it has no unlock to offer")
+    finally:
+        tc.context = _ctx
     t = resolve_target({"language": "ru", "target": {"code": "ru", "px": 19}})
     check(t["kind"] == "script" and t["script"] == "Cyrl" and t["px"] == 19.0, "resolve_target")
     check(tree_body("#a\nb") == "⟦23⟧a\\nb", "tree body form")

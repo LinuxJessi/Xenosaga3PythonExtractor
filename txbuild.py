@@ -184,6 +184,10 @@ def raw_objects(isos: List[str]) -> Dict[str, bytes]:
     return out
 
 
+class _ReadBackDone(Exception):
+    """The read-back of an unlocked build ends after the byte comparison."""
+
+
 def verify_objects(retail_isos: List[str], outs: List[str], expected: Dict[str, bytes]) -> Tuple[int, int, List[str]]:
     """Re-read the copies: every object of ``expected`` holds its bytes, every
     other text object (and font) is the retail one. -> (changed, untouched, problems)."""
@@ -217,6 +221,11 @@ def _was_lone(want_rid: str, retail: str) -> bool:
     except Exception:                                       # noqa: BLE001
         return False
 
+
+# free font cells of the USA executable without an unlock (USA Disc 1: 123
+# proportional + 51 wide; glyphs-slots). Past this, txtarget.scan_fitting opens
+# the kanji rows. A hint only: shaped scripts can need more cells than letters.
+FREE_CELLS_HINT = 174
 
 def preflight(project: dict, retail_iso: str) -> dict:
     """The checks a build makes before it writes anything, over the WHOLE project
@@ -274,6 +283,14 @@ def _preflight_rest(project: dict, retail: str, out: dict) -> dict:
             out["notes"].append(f"{target.get('name') or 'this language'} needs new letters: {msg}")
         out["notes"].append("new letters are drawn and fitted into the font when you build; "
                             "that step is checked by the build itself")
+        field = [t for rid, t in edits.items() if state.by_id.get(rid, {}).get("font") == tc.FIELD]
+        n_new = len(set(txtarget.coverage(field, target)["glyph"]))
+        if n_new > FREE_CELLS_HINT and tc.context(retail).addr.gate == "whitelist":
+            out["notes"].append(
+                f"{n_new} different new letters so far: more than the {FREE_CELLS_HINT} free cells of the "
+                f"game's font, so the build will open the font's kanji rows (thousands of cells; the "
+                f"executable is patched on both discs and English text with é, ä, ® and the like is "
+                f"re-encoded for it)")
     for k, v in list(kw_warn.items()) + list(core.warnings(edits, retail).items()):
         out["warnings"].setdefault(k, []).extend(v)
     out["ok"] = not out["errors"] and not any("not valid" in n or "different disc set" in n or "needs new letters" in n
@@ -378,6 +395,7 @@ def build(project_path: str, retail_iso: str, out, log: Callable[[str], None] = 
     work = Path(keep_work) if keep_work else Path(tempfile.mkdtemp(prefix="xs3tx-build-"))
     try:
         expected: Dict[str, bytes] = {}
+        unlock = "none"
         if script:
             ok, msg = txtarget.shaping_available()
             if not ok:
@@ -402,6 +420,7 @@ def build(project_path: str, retail_iso: str, out, log: Callable[[str], None] = 
                         expected[p] = new
             report = _rows
             target = res.get("target", target)
+            unlock = res.get("unlock", "none")
         else:
             changes, report = core.plan(user_edits, str(retail))
             bad_planned = core.planned_errors(state, changes, edits)
@@ -432,6 +451,20 @@ def build(project_path: str, retail_iso: str, out, log: Callable[[str], None] = 
         try:
             n_changed, n_same, problems = verify_objects(isos, [str(o) for o in outs], expected)
             rows_checked = 0
+            if unlock != "none":
+                # the kanji rows were opened (txtarget.scan_fitting): the copies' executables
+                # carry the unlock, and the editor's readers parse only the retail gate. The
+                # objects were compared byte for byte above; their links and byte limits were
+                # checked on the encoded objects before anything was written.
+                import glyphs as glyphmod
+                import region as regionmod
+                from iso9660 import IsoImage
+                for o in outs:
+                    with IsoImage(str(o)) as im:
+                        got = glyphmod.applied_unlock(regionmod.executable(im)[1])
+                    if got != unlock:
+                        problems.append(f"{o.name}: the executable carries unlock {got!r}, not {unlock!r}")
+                raise _ReadBackDone
             back = core.load_set([str(o.resolve()) for o in outs], cache=False)
             # what holds on both paths, checked on the bytes as written: a keyword is
             # still the <k...> word of its line, and no page passes a proven byte limit
@@ -462,6 +495,8 @@ def build(project_path: str, retail_iso: str, out, log: Callable[[str], None] = 
                         if back.by_id[rid_]["src"] != tc.to_display(
                                 tc.from_display(want, row["font"], row["ctl"], keep=want, ctx=state.ctx)[0], row["ctl"]):
                             problems.append(f"{rid_}: reads back as other text than was written")
+        except _ReadBackDone:
+            pass
         except Exception as exc:                                   # noqa: BLE001 - an unreadable copy is a failed build
             problems = [f"the copies could not be read back ({type(exc).__name__}: {exc})"]
             n_changed = n_same = rows_checked = 0
