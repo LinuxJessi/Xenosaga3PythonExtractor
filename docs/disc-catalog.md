@@ -205,6 +205,7 @@ here is in a format your OS can open without help.
 | `browse/text/`    | `.txt .mes`         | unchanged  | copy          | 158 / 141 files; cutscene subtitles + menu strings. Subtitles pair 1:1 with `browse/movies/` |
 | `browse/movies/`  | `.sfd`              | `.mp4`     | ffmpeg (x264 CRF 23 + AAC 160 kbps) | 18 / 24 files. Plays in any modern player. |
 | `browse/audio/`   | `.adx`              | `.wav`     | ffmpeg (`pcm_s16le`) | 3995 / 2095 files. Voice clips, SFX, music loops. |
+| `browse/music/`   | `snd/adx/*.adx`     | `.wav` + `music.csv` | ffmpeg; adx.py for the table | The soundtrack on its own (since 2026-11-21): the 120 streams directly in `snd/adx/`, with rate, length and loop points per stream. With the `music` kind on, these are no longer written under `browse/audio/`. See [MUSIC.md](MUSIC.md). |
 | `browse/code/`    | ISO root            | unchanged  | 7-Zip extract | 15 files per disc: SLUS executable + 3 OVL overlays + 10 IOP modules + SYSTEM.CNF. |
 | `browse/textures_png/` | `.xtx`, `.tm2`  | `.png`     | xtx_decode.py + tm2 helper | 379 / 379 files (367 linear XTX + 8 swizzled XTX + 4 TM2), plus a `*_index.png` ground-truth map per swizzled file. Includes the character portraits, episode logos, chapter-select background, and the formerly-scrambled UI sheets. |
 | `browse/soundbanks/` | `.dap`          | `.wav`     | dap_decode.py (pure Python) | One WAV per cue — SFX and instrument samples from `snd/dat/` and the minigame. |
@@ -242,164 +243,34 @@ identical — see Fun finds).
 
 ## What's still raw / not converted
 
-These keep their original bytes under `dump/` but no `browse/` conversion
-yet — they need format-specific work beyond the scope of this pipeline:
+These keep their original bytes under `dump/` and have no `browse/`
+conversion. [FORMATS.md](FORMATS.md#17-not-decoded) says what is known about
+each:
 
-- **3D models** (`.chr .map .wpn .sme`) — would need an XHR/XAP parser to
-  reconstruct meshes + skeletons + bound textures into glTF/FBX. The
-  container layout is documented (the "Xc" package family above), but
-  decoding the actual mesh streams is a separate project.
-- **Effect data** (`.esd .esp`) — parameter tables for the particle
-  system; unlikely to be viewable on their own, but interesting for
-  modders.
-- **Event scripts** (`.xep .xev`) — opcode streams for the cutscene VM.
-  Without a disassembler for that VM you only see the `Xc\x01\x03` header.
-- **Scene sound banks** (`.sb`) — `SB  ` magic + a table of section
-  offsets; the payload looks like cue/sequence scripts (opcode streams)
-  that reference samples in the `.dap` banks rather than embedded audio.
-- **Swizzled-XTX palette binding** — mostly closed 2026-11-20 (fifth pass):
-  the per-region CBPs are in SLUS (sprite tables + draw functions), OV01
-  (titleobj, whose CLUTs are its own alpha-ramp tiles) and OV04 (the
-  minigame table; the earlier "not in OV02/OV04" note was wrong).
-  `engine_palettes.py` ships them as per-sheet tables. Open: the ~22 % of
-  window0-2 art no draw found so far reaches (portrait cells outside the face
-  sprites, a few small portraits and frame pieces); a GS dump with those
-  menus open would settle them.
+- **Event packages** (`.xep .xev`): only the `Xc\x01\x03` header is understood.
+- **Effect parameters** (`.esd .esp`): their embedded textures are decoded,
+  the particle tables are not.
+- **DTPK driver tables** (`.dap`): the samples come out as WAV, the cue and
+  sequence tables are not decoded.
+- **Swizzled-XTX palette binding**: mostly closed 2026-11-20 (fifth pass).
+  The per-region palettes are in SLUS (sprite tables and draw functions), OV01
+  (titleobj) and OV04 (the minigame table), and `engine_palettes.py` ships
+  them as per-sheet tables. Open: the ~22 % of window0-2 art no draw found so
+  far reaches (portrait cells outside the face sprites, a few small portraits
+  and frame pieces); a GS dump with those menus open would settle them.
 
-Formerly on this list, now decoded: **swizzled XTX textures** (PSMT8 in a
-CT32 canvas — the Xenosaga I layout) and **DTPK sound banks** (`.dap` →
-per-cue WAVs, `browse/soundbanks/`).
+Formerly on this list, now converted: **3D models** (`.chr .map .wpn` and
+`.pxy`, to glTF since 2026-11-20; [MODELS.md](MODELS.md)), **motion** (`xap` /
+`.fap` clips as glTF animations since 2026-11-21; [MOTION.md](MOTION.md)), **swizzled XTX
+textures** and **DTPK sound banks**. An earlier version of this section called
+`.sb` "scene sound banks"; they are scene script banks.
 
 ---
 
 ## Fun finds
 
-### Both disc executables are byte-identical
-
-```
-md5 SLUS_213.89 (disc1) == md5 SLUS_214.17 (disc2) == 0ef759d006731b465da05f475f24c233
-```
-
-Only the filename differs — the PS2 firmware uses the title ID to recognise
-which disc is in the tray. Disc-switching logic is entirely data-driven; the
-same 4.5 MB MIPS ELF runs both halves of the game.
-
-### "KOS-MOS" is a literal C++ field
-
-A string in the binary reads:
-
-```c++
-pKosmos->rsrc[XAct_Rsrc_XAP_Ext2]
-```
-
-So the main character isn't just an art asset — she has a dedicated pointer
-in the engine's actor table. (Mildly funny because Jessi's parent workspace
-directory is also named `KOS-MOS/`.)
-
-### The engine is called "PsII"
-
-Eight modules with the `PsII` prefix link into SLUS:
-`PsIIlibcdvd · PsIIlibdma · PsIIlibgraph3000 · PsIIlibipu · PsIIlibkernl3000 ·
-PsIIlibmc · PsIIlibpkt · PsIIlibsdr`. The `3000` suffix is the
-PlayStation 2 SDK Series 3000 build; the rest are MonolithSoft wrappers.
-
-### MatuzawaTest — a programmer's debug toggle
-
-The string `?MatuzawaTest: NODEBUG` is preserved verbatim, along with
-`CF Debug Flags` and `DEBUGPAUSE:`. Matsuzawa (松澤) was one of the
-engineers on the team — they left a personal feature-flag in the shipped
-build. (PS2-era games shipped with debug stubs all the time; it just wasn't
-common to keep a name attached.)
-
-### Test source filenames survived stripping
-
-The shipped binary still names test sources that were never supposed to be
-in a release build:
-
-```
-BlendTest.euc.c       CFLLightTest.euc.c    CullingTest.euc.c
-ScisTest.euc.c        XstAnimTest.euc.c
-```
-
-The `.euc.c` extension is the MonolithSoft convention for **EUC-JP-encoded
-C source** (so the comments can be in Japanese without needing UTF-8). The
-test harness clearly lived in the same build target as the shipped game.
-
-### CRI middleware was frozen 10 months before release
-
-Build-date strings inside SLUS:
-
-```
-ADXRT  Ver.3020 Build:Sep 20 2005   ← CRI ADX audio runtime
-SJ/PS2EE Ver.6.34 Build:Sep 20 2005 ← CRI Sofdec movie player
-PL2ENC Ver.1.02 Build:Sep 20 2005   ← CRI's encoder helper
-```
-
-All three middleware libraries were built on the same Tuesday morning in
-September 2005. The disc was mastered ten months later (`2006-07-12`).
-
-### Languages that never shipped
-
-The locale-code table reads `jpjpusendefriteszhko` — JP / JP / US / EN /
-DE / FR / IT / ES / ZH / KO. The US disc only ships the `us/` subtrees
-under `evt/`, `mov/`, `jpg/`, `mnu/`, `bat/`, `cf/`, `ef/`, but the engine
-clearly had localization machinery for ten languages, including Korean and
-Simplified Chinese. (No Korean or Chinese release of Xenosaga III actually
-happened.)
-
-### Subtitles ship as separate text files
-
-Every `mov/*.sfd` cutscene has a `evt/us/{stem}.txt` companion with the
-dialogue in tab-separated form — character timing on the left,
-speaker-tagged line on the right. The first row sets visual style with
-control codes like `$ay375;$xx0,24;$rubyy-4;$col707070;` — vertical
-position, baseline-style, ruby (furigana) annotation, and color. So the
-game's subtitle renderer supported ruby characters natively even though
-the US release doesn't use any.
-
-### The XAct resource enum
-
-The pre-stripped enum names are still visible:
-
-```
-XAct_Rsrc_MDL    XAct_Rsrc_TEX    XAct_Rsrc_XAP    XAct_Rsrc_XAP_Ext2
-XAct_Rsrc_XHR    XAct_Rsrc_XST
-```
-
-"XAct" is the engine's actor/asset system. `XAP_Ext2` exists as a slot for
-secondary animation packs — implying actors can have layered animation
-banks (probably for combos or scripted overrides).
-
-### `credit.bin` is actually the boot logos
-
-Turns out `mnu/credit.bin` isn't credits at all — and it's not obfuscated.
-It's a tiny container holding **four concatenated JPEG images**: the
-publisher (Bandai Namco Games) and developer (MonolithSoft) splash
-screens that play at boot, plus two more. Each was extracted to
-`browse/images/mnu/credit/credit_NN.jpg`. The "obfuscation" was just the
-absence of ASCII strings because the payload is JPEG-compressed.
-
-### Resource arithmetic in plain text
-
-The binary contains live debug formatters:
-
-```
-%.2f/%.2f/%.2f/%.2f
-ALL %2.2f / %2.2fMB
-MAT %2.2f / %2.2fMB
-XEP %2.2f / %2.2fMB
-```
-
-So the engine had a built-in memory-budget HUD broken down by resource
-type (`ALL`, `MAT` = materials, `XEP` = event package, etc.). Probably
-behind one of those Matuzawa debug flags.
-
-### Dual-purpose mg1 minigame
-
-The `mg1/` folder is treated as a separate game inside the game — it has
-its own `Stage_NNNN.BMP` board art, its own `Message.Dat` text table, and
-its own `Picture.xtx`. The format conventions don't match the rest of the
-engine (BMPs instead of XTX), suggesting a different team built it.
+Moved to their own page, with the later ones from the prototype and the
+Japanese discs: [FINDS.md](FINDS.md).
 
 ---
 

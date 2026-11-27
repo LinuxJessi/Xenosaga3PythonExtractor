@@ -31,6 +31,12 @@ under the stage tree, with one of a handful of conversion strategies:
                      sha1 de-duplication and a ``package_textures.csv``
                      manifest (see chrtex.py / xcpack.py).
 * ``audio``        — decode ``.adx`` to PCM WAV via ffmpeg into ``audio/``.
+* ``music``        — the soundtrack on its own: the 120 ADX streams that sit
+                     directly in ``snd\\adx\\`` as WAV under ``music/``, with
+                     ``music/music.csv`` (rate, length and the loop points
+                     read from each stream's header; adx.py). When ``audio``
+                     runs too, these streams are written under ``music/``
+                     only, not a second time under ``audio/``.
 * ``soundbanks``   — decode ``.dap`` DTPK sound banks to one WAV per cue
                      under ``soundbanks/`` (pure Python, no ffmpeg), plus the
                      ``dap`` bank embedded in each combatant ``.sme`` bundle.
@@ -80,6 +86,7 @@ from typing import Iterable, List, Optional, Set, Tuple
 
 import re
 
+import adx as adx_mod
 import region as region_mod
 import sb as sb_mod
 import subtitle as subtitle_mod
@@ -131,7 +138,7 @@ def _item_text(item) -> str:
 
 
 ALL_KINDS = ("images", "text", "textures", "textures_png", "package_textures",
-             "audio", "soundbanks", "movies", "carved", "models")
+             "audio", "music", "soundbanks", "movies", "carved", "models")
 
 
 # Common install locations for ffmpeg on each OS, used when ``ffmpeg`` isn't
@@ -201,6 +208,7 @@ _EXTS = {
     "textures":     {".xtx", ".tm2", ".txy", ".bmp", ".png"},
     "textures_png": {".xtx", ".tm2"},
     "audio":        {".adx"},
+    "music":        {".adx"},
     "soundbanks":   {".dap"},
     "movies":       {".sfd"},
     # ``carved`` is filename-based — handled separately.
@@ -227,6 +235,8 @@ class BundleStats:
     textures_png_err: int = 0
     audio_ok: int = 0
     audio_err: int = 0
+    music_ok: int = 0
+    music_err: int = 0
     soundbanks_ok: int = 0
     soundbanks_err: int = 0
     soundbank_cues: int = 0
@@ -251,7 +261,7 @@ class BundleStats:
     def total_ok(self) -> int:
         return (
             self.images + self.text + self.textures + self.textures_png_ok
-            + self.audio_ok + self.soundbanks_ok + self.movies_ok + self.carved_jpgs
+            + self.audio_ok + self.music_ok + self.soundbanks_ok + self.movies_ok + self.carved_jpgs
         )
 
 
@@ -363,6 +373,17 @@ def _convert_one(
         ok, err = _decode_tm2(in_path, dest)
         return ("textures_png", None if ok else f"TM2 {rel}: {err}", 0)
 
+    if ext == ".adx" and adx_mod.is_soundtrack(game_path(rel)):
+        # the soundtrack: under music/ when that kind is on (and then not a
+        # second time under audio/), else with the other streams under audio/
+        if "music" in kinds:
+            dest = stage_root / "music" / (in_path.stem + ".wav")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            ok, err = _run_ffmpeg([ffmpeg, "-y", "-loglevel", "error", "-i", str(in_path), str(dest)])
+            return ("music", None if ok else f"ADX {rel}: {err}", 0)
+    elif ext == ".adx" and "audio" not in kinds:
+        return ("skip", None, 0)            # music only: voice and event streams are not music
+
     if "audio" in kinds and ext in _EXTS["audio"]:
         dest = (stage_root / "audio" / rel).with_suffix(".wav")
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -384,6 +405,33 @@ def _convert_one(
         return ("movies", None if ok else f"SFD {rel}: {err}", 0)
 
     return ("skip", None, 0)
+
+
+def _music_table(dump_root: Path, stage_root: Path) -> int:
+    """Write ``music/music.csv``: one row per soundtrack stream of the dump
+    (adx.table_row: rate, channels, length, loop points from the header)."""
+    import csv
+    rows = []
+    for p in sorted(dump_root.rglob("*")):
+        if p.suffix.lower() != ".adx" or not p.is_file() or "_reports" in p.parts:
+            continue
+        gpath = game_path(p.relative_to(dump_root))
+        if not adx_mod.is_soundtrack(gpath) or p.stat().st_size == 0:
+            continue
+        with open(p, "rb") as fh:
+            head = fh.read(0x40)
+        try:
+            rows.append(adx_mod.table_row(gpath, head, p.stat().st_size))
+        except adx_mod.AdxError as exc:
+            rows.append([p.stem, gpath, str(p.stat().st_size)] + [""] * 9 + [str(exc)])
+    if rows:
+        out = stage_root / "music"
+        out.mkdir(parents=True, exist_ok=True)
+        with open(out / "music.csv", "w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(adx_mod.CSV_HEADER)
+            w.writerows(rows)
+    return len(rows)
 
 
 def _gather(dump_root: Path, kinds: Set[str]) -> List[Path]:
@@ -839,6 +887,9 @@ def bundle(
                 elif kind == "audio":
                     if err is None: stats.audio_ok += 1
                     else: stats.audio_err += 1; stats.errors.append(err)
+                elif kind == "music":
+                    if err is None: stats.music_ok += 1
+                    else: stats.music_err += 1; stats.errors.append(err)
                 elif kind == "soundbanks":
                     if err is None:
                         stats.soundbanks_ok += 1
@@ -861,6 +912,8 @@ def bundle(
                         flush=True,
                     )
 
+    if "music" in kinds_set:
+        _music_table(dump_root, stage_root)
     if "carved" in kinds_set:
         _carve_jpegs(dump_root, stage_root, stats)
     if "text" in kinds_set:
@@ -876,6 +929,7 @@ def bundle(
         f"[browse] done: images={stats.images} text={stats.text} textures={stats.textures} "
         f"textures_png={stats.textures_png_ok}+{stats.textures_png_err}err "
         f"audio={stats.audio_ok}+{stats.audio_err}err "
+        f"music={stats.music_ok}+{stats.music_err}err "
         f"soundbanks={stats.soundbanks_ok}+{stats.soundbanks_err}err ({stats.soundbank_cues} cues) "
         f"movies={stats.movies_ok}+{stats.movies_err}err "
         f"carved={stats.carved_jpgs} "
@@ -979,6 +1033,22 @@ def self_test() -> int:
         (root / "chain0" / "mnu" / "us").mkdir()
         (root / "chain0" / "mnu" / "us" / "menutext.txd").write_bytes(b"")
         check(detect_dump_region(root).name == "us", "a dump with mnu/us/menutext.txd detects as us")
+
+    # the music kind: the soundtrack is the streams directly in snd\adx\
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "chain0" / "snd" / "adx" / "mev").mkdir(parents=True)
+        (root / "chain0" / "snd" / "adx" / "B01.adx").write_bytes(adx_mod._synthetic())
+        (root / "chain0" / "snd" / "adx" / "mev" / "s010100_01.adx").write_bytes(adx_mod._synthetic(flag=0))
+        stage = root / "stage"
+        n = _music_table(root, stage)
+        text = (stage / "music" / "music.csv").read_text(encoding="utf-8") if n else ""
+        check(n == 1 and text.splitlines()[0].startswith("track,path,") and "B01,snd\\adx\\B01.adx" in text
+              and "s010100" not in text, "music.csv lists the soundtrack stream and not the voice stream")
+        check("music" in ALL_KINDS and _EXTS["music"] == {".adx"}, "music is a browse kind")
+        k, err, _ = _convert_one(root / "chain0" / "snd" / "adx" / "mev" / "s010100_01.adx", root, stage,
+                                 "ffmpeg-not-run", [], {"music"})
+        check(k == "skip" and err is None, "music alone leaves the voice streams alone")
 
     jp_iso = os.environ.get("XS3_JP1")
     if not jp_iso:

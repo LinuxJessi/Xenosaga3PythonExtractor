@@ -460,6 +460,30 @@ class SbKind(BlockKind):
     def build(self, obj, new, force):
         return sb.rebuild(obj, [new.get(f"{i:04d}", s) for i, s in enumerate(obj.strings)])
 
+    def export(self, path, data, reg):
+        """As BlockKind.export, plus a ``use:<kind>`` word on each ``### KEY``
+        line: what the script's CODE does with the string (dialogue.string_kinds:
+        event box npc choice think system battle banner table = drawn; keyword =
+        the word a townsperson waits for, which must stay equal to the ``<k...>``
+        tag of its line; debug = only ever printed by deb.put, never drawn;
+        resource = an id or file name; unused). The word is a note for the
+        reader: import reads the key (the first word) and ignores it, and a
+        script whose code cannot be read simply has none."""
+        text, meta = super().export(path, data, reg)
+        try:
+            import dialogue
+            kinds = dialogue.string_kinds(data)
+        except Exception:                                          # noqa: BLE001 - the export never depends on it
+            return text, meta
+        out = []
+        for ln in text.split("\n"):
+            if ln.startswith("### "):
+                key = ln[4:].split(" ", 1)[0]
+                if key.isdigit() and int(key) in kinds:
+                    ln += " use:" + kinds[int(key)]
+            out.append(ln)
+        return "\n".join(out), meta
+
     def warnings(self, it, raw, reg, warn):
         if warn is None:
             return
