@@ -23,10 +23,12 @@ under it: the kit's text pipeline (`textpack`, `textcodec`, `langpack`,
 > PCSX2 on USA Disc 1 with Hindi, Traditional Chinese, Cherokee and Arabic
 > (2026-11-21: a location caption over the real-time opening and the first
 > dialogue box; the Chinese build again on 2026-11-27 after the glyph-size
-> fix). Everything else below comes from the kit's own tests on the real discs
+> fix). On 2026-11-27, French on the Settings menu (heading, rows, values,
+> help lines, button hints) and Spanish in the opening caption and the first
+> scene's dialogue (¿, á, é, í, ú) followed. Everything else below comes from the kit's own tests on the real discs
 > (USA Disc 1 + 2 and Japan Disc 1 + 2): rows read, builds written to clones,
-> the clones read back. Not booted yet: Disc 2, the Japanese discs, a French
-> build, menus and battle text from an editor build. The page was walked
+> the clones read back. Not booted yet: battle text, Disc 2 and the Japanese
+> discs. The page was walked
 > through in Chrome on 2026-11-26/27. See [What was tested](#what-was-tested).
 > Pictures: [LANGKIT.md](LANGKIT.md).
 

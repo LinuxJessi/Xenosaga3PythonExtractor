@@ -21,6 +21,9 @@ back from that project.)
   that no editor build has been booted.
 * The stand-alone editor app was rebuilt with every 2026-11-26 fix; its
   bundled self-tests pass.
+* In the game: editor builds of French menus (the Settings screen) and a
+  Spanish opening (caption and first scene) were booted in PCSX2. The
+  captures are now on docs/LANGKIT.md and the front page.
 
 ## 2026-11-26 — Translation editor brought to the Episode I standard
 

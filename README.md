@@ -27,10 +27,9 @@ copy of the disc and checks every byte it wrote.
 </tr>
 </table>
 
-**The kit ships no game data.** You need your own copy of the discs. Every
-game picture and sound on this page was made by the kit from the retail discs
-or captured from the game running in PCSX2 on a disc the kit patched; nothing
-is retouched.
+**Bring your own discs:** the kit works from your copy of the game. Every
+picture and sound on this page was made by the kit from the retail discs, or
+captured exactly as it appeared in PCSX2, running a disc the kit patched.
 
 This is the Episode III sibling of the
 [Episode I extractor](https://github.com/LinuxJessi/Xenosaga1PythonExtractor)
@@ -43,8 +42,8 @@ built the same way, with code borrowed from both where the formats are shared
 > Reading is tested on all five images. Discs written by the kit have been
 > booted in PCSX2 with English edits, Arabic, Hindi, Amharic, Georgian,
 > Japanese on the USA disc, a grown file and a character recolour (Disc 1,
-> 2026-11-20/21), and translation-editor builds in Hindi, Chinese, Cherokee
-> and Arabic (2026-11-21/27; [docs/UPDATES.md](docs/UPDATES.md) says exactly what). Not
+> 2026-11-20/21), and translation-editor builds in French, Spanish, Hindi,
+> Chinese, Cherokee and Arabic (2026-11-21/27; [docs/UPDATES.md](docs/UPDATES.md) says exactly what). Not
 > yet booted: Disc 2 and the disc swap, the Japanese discs, the prototype,
 > imported pictures and the battle HUD letters.
 
@@ -59,42 +58,43 @@ built the same way, with code borrowed from both where the formats are shared
 
 ## The translation editor (langkit)
 
-Translate the whole game from one page in your browser: pick your discs and a
-language, type, press **Build**, and get patched copies of Disc 1 and Disc 2.
-It knows 382 languages, adds the few letters French or German lack by itself,
-and draws new alphabets (Arabic, Devanagari, Cherokee, Chinese…) into the
-game's own font. Translators can download it **on its own**, without the
-extractor kit. **[A tour with more pictures: docs/LANGKIT.md](docs/LANGKIT.md)**
+Play Episode III in your own language. Open the translation editor, pick
+your discs and a language, and type. Press **Build** and you get patched
+copies of Disc 1 and Disc 2 that boot like the originals. The editor knows
+382 languages and adds the few letters French or German need. It can also
+draw whole new alphabets (Arabic, Devanagari, Cherokee, Chinese…) into the
+game's own font. Translators can download it on its own.
+**[See the langkit tour: docs/LANGKIT.md](docs/LANGKIT.md)**
 
 <table>
+<tr>
+<td align="center"><img src="docs/images/editor/xs3-ingame-editor-french-settings.jpg" width="400" alt="The Settings menu in French, drawn by the game in PCSX2 from a disc the editor built"></td>
+<td align="center"><img src="docs/images/editor/xs3-ingame-editor-spanish-dialogue-2.jpg" width="400" alt="A Spanish line in the first cutscene's dialogue box, PCSX2 capture"></td>
+</tr>
+<tr>
+<td align="center"><sub>French menus, in the game</sub></td>
+<td align="center"><sub>A Spanish cutscene, in the game</sub></td>
+</tr>
 <tr>
 <td colspan="2" align="center"><img src="docs/images/editor/editor-translate-french.jpg" width="820" alt="The translation editor: the opening scene being translated into French, with a preview of the original and the translation drawn with the game's own font"></td>
 </tr>
 <tr>
-<td colspan="2" align="center"><sub>Translating the opening scene into French: every line of both discs, grouped by what it is, checked as you type, previewed in the game's own font</sub></td>
+<td colspan="2" align="center"><sub>The editor: every line of both discs grouped the way you meet them, checked as you type, and previewed in the game's own font</sub></td>
 </tr>
 <tr>
 <td align="center"><img src="docs/images/editor/editor-language-setup-arabic.jpg" width="400" alt="Language setup: Arabic, fonts that have every letter, and a test line drawn right to left"></td>
-<td align="center"><img src="docs/images/editor/editor-by-speaker.jpg" width="400" alt="The By speaker view with KOS-MOS's 87 lines"></td>
-</tr>
-<tr>
-<td align="center"><sub>Language setup: a new script, right to left</sub></td>
-<td align="center"><sub>Browse by speaker</sub></td>
-</tr>
-<tr>
 <td align="center"><img src="docs/images/editor/xs3-ingame-editor-chinese-dialogue.jpg" width="400" alt="Traditional Chinese in the first dialogue box, PCSX2 capture of a disc the editor built"></td>
-<td align="center"><img src="docs/images/editor/xs3-ingame-editor-cherokee-dialogue.jpg" width="400" alt="Cherokee in the first dialogue box, PCSX2 capture of a disc the editor built"></td>
 </tr>
 <tr>
-<td align="center"><sub>Traditional Chinese, from an editor build (PCSX2)</sub></td>
-<td align="center"><sub>Cherokee, from an editor build (PCSX2)</sub></td>
+<td align="center"><sub>Language setup for a new alphabet</sub></td>
+<td align="center"><sub>Traditional Chinese, in the game</sub></td>
 </tr>
 </table>
 
-Get it: `Xenosaga3-Translation-Editor-<version>-win64.zip` from the releases
-page, `python build.py --editor` for a macOS app, or `translate.command` /
-`translate.bat` / `translate.sh` from a checkout. Reference:
-[docs/TRANSLATION-EDITOR.md](docs/TRANSLATION-EDITOR.md).
+Get it as `Xenosaga3-Translation-Editor-<version>-win64.zip` from the releases
+page, or build a macOS app with `python build.py --editor`. From a checkout,
+double-click `translate.command`, `translate.bat` or `translate.sh`. The
+full reference is [docs/TRANSLATION-EDITOR.md](docs/TRANSLATION-EDITOR.md).
 
 ## Models
 
@@ -225,8 +225,8 @@ equal to the word in its line. French works with nothing to set up: the
 three letters the USA font lacks (`œ Œ Ÿ`) are added from a font that ships
 with the kit. Dialogue has a width guide read from the game's window code
 (the game never wraps; 469 px keeps a window on the 512 px screen), and
-*Wrap to fit* breaks lines to it. Its builds are read back by the kit, and
-Hindi, Chinese, Cherokee and Arabic builds were booted in PCSX2
+*Wrap to fit* breaks lines to it. Its builds have been played in PCSX2 in
+French, Spanish, Hindi, Chinese, Cherokee and Arabic
 ([docs/LANGKIT.md](docs/LANGKIT.md)).
 [docs/TRANSLATION-EDITOR.md](docs/TRANSLATION-EDITOR.md).
 
