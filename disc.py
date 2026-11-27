@@ -53,12 +53,14 @@ an original image; each step re-reads the image afterwards):
 
 UDF: every known XS3 image is an ISO9660 + UDF bridge disc (BEA01/NSR02/TEA01
 at sectors 18-20, an anchor volume descriptor at sector 256 and in the last
-sector: D1 1,915,919, JP1 1,984,399). These primitives keep ONLY the ISO9660
-side consistent. After ``append``/``pad_to`` the old trailing UDF anchor sits
-mid-image and the UDF partition still describes the old size; after
-``write_fs_file``/``relocate_fs_file`` the UDF file entries still give the old
-extent and length. The PS2 and PCSX2 read ISO9660 (not booted for XS3 yet);
-tools that read or burn through UDF would see an inconsistent image.
+sector: D1 1,915,919, JP1 1,984,399). The single steps above touch only the
+ISO9660 side; ``sync_udf()`` then fixes the UDF side in one go (``udf.py``,
+descriptor handling ported from Anzinono's xenosaga3-translation-kit, MIT): a
+grown image gets one extra sector for the end anchor, the partition and
+integrity sizes follow the image, and moved or resized ISO9660 files get their
+UDF file entries rewritten. ``patch.py`` calls it after every patch and
+checks the result (``udf_problems``). The game itself reads ISO9660 only;
+this is for tools that mount or burn through UDF.
 
 The multi-file, copy-based write layer every importer uses is ``patch.py``
 (``patch_copy``); these primitives are its single steps.
@@ -86,6 +88,7 @@ from iso9660 import IsoImage, SECTOR
 # the X3.00-X3.13 / X3.20-X3.23 chain containers in the ISO root
 BIGFILE_RE = re.compile(r"(?i)^x3\.\d\d(;1)?$")
 from toc_bin import TocEntry, parse_toc
+import udf
 
 DVD9_SECTORS = 4_173_824          # single-sided dual-layer ceiling
 DVD5_SECTORS = 2_295_104          # single layer
@@ -114,6 +117,7 @@ class Disc:
         self._wfh = open(self.path, "r+b") if writable else None
         self.iso: Optional[IsoImage] = None
         self._load()
+        self._udf_snapshot()
 
     # -- loading -------------------------------------------------------------
 
@@ -146,6 +150,11 @@ class Disc:
             {self.index_lba(c) * SECTOR + e.byte_offset for c, ents in self.entries_by_chain.items()
              for e in ents}
             | {f.lba * SECTOR for f in self.iso.files.values() if not f.is_dir and f.size > 0})
+        # the UDF end anchor in the last sector is an object too: nothing grows over it
+        last = self.iso.image_size // SECTOR - 1
+        if last > udf.ANCHOR and udf.tag_id(self.iso.mm[last * SECTOR:last * SECTOR + 16]) == udf.TAG_AVDP \
+                and udf.tag_ok(bytes(self.iso.mm[last * SECTOR:(last + 1) * SECTOR]), last):
+            self._abs_starts.append(last * SECTOR)
 
     def close(self) -> None:
         if self.iso is not None:
@@ -462,6 +471,51 @@ class Disc:
         old = struct.unpack_from("<I", self.iso.mm, base + 80)[0]
         new = old + sectors
         self._pwrite(base + 80, struct.pack("<I", new) + struct.pack(">I", new))
+
+    # -- UDF ---------------------------------------------------------------------------
+
+    def _udf_snapshot(self) -> None:
+        """Remember the image size and every layer-0 ISO9660 extent as opened, so
+        ``sync_udf`` can tell what the write steps changed."""
+        self._udf_sectors = self.iso.image_size // SECTOR
+        self._udf_files = {f.path: (f.lba, f.size) for f in self.iso.files.values()
+                           if not f.is_dir and f.layer == 0}
+
+    def has_udf(self) -> bool:
+        with open(self.path, "rb") as fh:
+            return udf.has_udf(fh)
+
+    def udf_problems(self) -> List[str]:
+        """``udf.check`` on this image (empty = the UDF side agrees with ISO9660)."""
+        files = {f.lba: f.size for f in self.iso.files.values() if not f.is_dir and f.layer == 0}
+        with open(self.path, "rb") as fh:
+            return udf.check(fh, self.iso.image_size // SECTOR, files)
+
+    def sync_udf(self) -> List[str]:
+        """Bring the UDF side in line with what the write steps did since this Disc
+        was opened (``udf.py``): a grown image gets one more sector for the end
+        anchor, the partition and integrity sizes follow, moved or resized ISO9660
+        files get their UDF file entries rewritten. No-op when nothing changed or
+        the image has no UDF. Returns log lines."""
+        self._need_writable("sync_udf")
+        cur = self.iso.image_size // SECTOR
+        now = {f.path: (f.lba, f.size) for f in self.iso.files.values() if not f.is_dir and f.layer == 0}
+        moves = {old[0]: now[p] for p, old in self._udf_files.items() if p in now and now[p] != old}
+        if (cur == self._udf_sectors and not moves) or not udf.has_udf(self._wfh):
+            return []
+        if self.iso.layer2_pvd_sector is not None:
+            raise DiscError("sync_udf: dual-layer images are not handled (no known XS3 image is one)")
+        if cur != self._udf_sectors:
+            # the old end anchor now sits mid-image (harmless, unreferenced);
+            # one fresh sector at the end carries the new one
+            self._check_growable("sync_udf", cur + 1)
+            self._wfh.truncate((cur + 1) * SECTOR)
+            self._bump_volume(16, 1)
+            cur += 1
+        log = udf.sync(self._wfh, cur, moves)
+        self._load()
+        self._udf_snapshot()
+        return log
 
     def append_entry(self, ref: EntryRef, data: bytes) -> int:
         """Grow an entry: append its new bytes at the image end and repoint its index

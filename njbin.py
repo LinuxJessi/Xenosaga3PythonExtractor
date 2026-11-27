@@ -23,12 +23,18 @@ it is frozen by the object's sha1 (textpack refuses another revision).
 Strings are re-laid in their original order from the original start; each
 pointer gets ``new start of its string + its byte offset``.
 
-**Mid-string values.** 7 fields in DBC2.bin and 7 in njDataText.bin (D1) land
-inside a string ('View s|ummary of ...', '<Federation| Police>'). They are
-kept as (string, byte offset). Their meaning is NOT known: they may be page
-breaks or plain numbers that happen to fall in range (in CHA records they sit
-in a column of their own). So a rebuild refuses to change a string that holds
-one; when only other strings change they move with their string.
+**Mid-string values are numbers, not pointers.** 7 values in DBC2.bin and 7
+in njDataText.bin (USA Disc 1) land inside a string. All of them sit in
+record columns that never point at text anywhere else: DBC2 ``DBF`` fields 7
+and 8 (ids such as 0x3EB/0x7DC; the same columns in DBC.bin hold the same kind
+of id or FFFFFFFF and never touch text), njDataText ``CHA`` field 2 (a rising
+count) and ``TOP`` field 4 (1, 8, 0, 0, ...). Anzinono's xenosaga3-translation-kit
+(``docs/formats/datenbank.md``) reaches the same layout independently: DBF
+string fields are exactly 3, 5 and 9-14, in all 906 records. So such a value is
+kept as the number it is (``Blob.numbers``): it is never moved, and the string
+it happens to land in may change like any other. (Up to 2026-11-26 the kit
+moved these values with their string, which rewrote the ids whenever an
+earlier string changed, and refused edits to the 14 strings.)
 
 Japanese build (``mnu\\jp\\``): the same container and the same pointer-scan
 rebuild (7/7 byte-identical). Strings use the JP codec. Per build the blob
@@ -112,8 +118,10 @@ class Blob:
     data: bytes
     start: Optional[int]                     # string area start, None = no strings
     segs: List[Tuple[int, bytes]] = field(default_factory=list)       # (offset, bytes)
-    ptrs: List[Tuple[int, int, int]] = field(default_factory=list)    # (field, seg index, byte offset)
+    ptrs: List[Tuple[int, int, int]] = field(default_factory=list)    # (field, seg index, 0)
     terminated: bool = True
+    numbers: List[Tuple[int, int, int]] = field(default_factory=list)  # (field, seg index, byte offset)
+    # ^ values that land INSIDE a string: plain numbers (module docstring), kept verbatim
 
     @property
     def strings(self) -> List[bytes]:
@@ -126,7 +134,12 @@ class Blob:
         return out
 
     def mid(self) -> Dict[int, List[int]]:
-        return {k: [j for j in js if j] for k, js in self.referenced().items() if any(js)}
+        """{string index: byte offsets} of the in-range numbers that land inside a
+        string. Informational only: they are not pointers and block nothing."""
+        out: Dict[int, List[int]] = {}
+        for _f, k, j in self.numbers:
+            out.setdefault(k, []).append(j)
+        return out
 
 
 def pointer_map(b: bytes) -> Blob:
@@ -147,12 +160,12 @@ def pointer_map(b: bytes) -> Blob:
     for k, (st, s) in enumerate(segs):
         for j in range(len(s) + 1):
             where.setdefault(st + j, (k, j))
-    ptrs = []
+    ptrs, numbers = [], []
     for p, v in vals:
         if p + 4 <= start and start <= v < len(b) and v in where:
             k, j = where[v]
-            ptrs.append((p, k, j))
-    return Blob(b, start, segs, ptrs, b.endswith(b"\0"))
+            (numbers if j else ptrs).append((p, k, j))
+    return Blob(b, start, segs, ptrs, b.endswith(b"\0"), numbers)
 
 
 def build_blob(blob: Blob, strings: List[bytes]) -> bytes:
@@ -162,10 +175,6 @@ def build_blob(blob: Blob, strings: List[bytes]) -> bytes:
         return blob.data
     if len(strings) != len(blob.segs):
         raise NjError(f"{len(strings)} strings given, the blob holds {len(blob.segs)}")
-    for k, js in blob.mid().items():
-        if strings[k] != blob.segs[k][1]:
-            raise NjError(f"string {k} holds a value that points inside it (byte offset(s) "
-                          f"{', '.join(map(str, js))}) whose meaning is unknown; it cannot be changed")
     out, new = bytearray(blob.data[:blob.start]), []
     for s in strings:
         if b"\0" in s:
@@ -196,9 +205,9 @@ class Container:
     def items(self) -> List[textcodec.Item]:
         out = []
         for i, b in enumerate(self.blobs):
-            mid, refd = b.mid(), b.referenced()
+            refd = b.referenced()
             for k, s in enumerate(b.strings):
-                flags = (("mid-string",) if k in mid else ()) + (() if k in refd else ("unreferenced",))
+                flags = () if k in refd else ("unreferenced",)
                 out.append(textcodec.Item(f"{i:02d}.{k:04d}", s, self.codec(s), "menu-db", flags))
         return out
 
@@ -249,22 +258,21 @@ def self_test() -> int:
     data = build_outer([blob, b"\x01\x02\x03"])
     c = parse(data)
     check(build_outer([b.data for b in c.blobs]) == data, "synthetic: outer container rebuilds byte-identically")
-    check(c.blobs[0].strings == strs and len(c.blobs[0].ptrs) == 4 and c.blobs[0].mid() == {1: [5]},
-          "synthetic: pointer map finds 4 pointers, one mid-string")
+    check(c.blobs[0].strings == strs and len(c.blobs[0].ptrs) == 3 and c.blobs[0].mid() == {1: [5]},
+          "synthetic: pointer map finds 3 pointers and one in-range number inside a string")
     check(rebuild(c, [b.strings for b in c.blobs]) == data, "synthetic: unchanged rebuild is identical")
     new = rebuild(c, [[b"Alpha longer", strs[1], b"D"], []])
     c2 = parse(new)
-    check(c2.blobs[0].strings == [b"Alpha longer", strs[1], b"D"] and c2.blobs[0].mid() == {1: [5]},
-          "synthetic: an edit moves later strings and the mid-string value with its string")
-    try:
-        rebuild(c, [[strs[0], b"Beta delta", strs[2]], []])
-        check(False, "synthetic: editing a string with a mid-string value is refused")
-    except NjError:
-        check(True, "synthetic: editing a string with a mid-string value is refused")
+    check(c2.blobs[0].strings == [b"Alpha longer", strs[1], b"D"]
+          and struct.unpack_from("<I", c2.blobs[0].data, 12)[0] == offs[1] + 5,
+          "synthetic: an edit moves later strings but leaves the in-range number as it was")
+    c3 = parse(rebuild(c, [[strs[0], b"Beta delta longer", strs[2]], []]))
+    check(c3.blobs[0].strings[1] == b"Beta delta longer" and struct.unpack_from("<I", c3.blobs[0].data, 12)[0] == offs[1] + 5,
+          "synthetic: the string a number lands in may change; the number stays")
 
     cj = parse(data, "jp")
-    check([i.codec for i in cj.items][:3] == ["jp"] * 3 and [i.flags for i in cj.items][1] == ("mid-string",)
-          and rebuild_items(cj, [("00.0000", b"Alpha")]) == data, "items API: JP codec, mid-string flag, keyed rebuild")
+    check([i.codec for i in cj.items][:3] == ["jp"] * 3 and [i.flags for i in cj.items][1] == ()
+          and rebuild_items(cj, [("00.0000", b"Alpha")]) == data, "items API: JP codec, no flag on a string a number lands in, keyed rebuild")
 
     isos = [(k, os.environ.get(k)) for k in ("XS3_D1", "XS3_D2", "XS3_PROTO", "XS3_JP1", "XS3_JP2")]
     if not any(v for _, v in isos):
@@ -289,6 +297,22 @@ def self_test() -> int:
                 res.append((p.rsplit("\\", 1)[-1], full == d, len(c.blobs), n,
                             sum(len(v) for b in c.blobs for v in b.mid().values())))
             good = all(r[1] for r in res)
+            # every DBC2 string grown by 7 bytes: the records' non-pointer words (the
+            # ids in DBF fields 7/8 that land inside strings) must stay as they were
+            p2 = next((p for p in paths if p.lower().endswith("dbc2.bin")), None)
+            if p2 is not None:
+                c = parse(disc.read(p2), reg)
+                new = parse(rebuild(c, [[s + b"+++++++" for s in b.strings] for b in c.blobs]), reg)
+                same = True
+                for ob, nb in zip(c.blobs, new.blobs):
+                    if ob.start is None:
+                        continue
+                    pf = {f for f, _k, _j in ob.ptrs}
+                    same &= all(ob.data[f:f + 4] == nb.data[f:f + 4] for f in range(0, ob.start - 3, 4) if f not in pf)
+                    same &= nb.strings == [s + b"+++++++" for s in ob.strings]
+                nums = sum(len(b.numbers) for b in c.blobs)
+                check(same, f"{env}: DBC2.bin with every string longer: strings read back, the {nums} in-range "
+                      "numbers and every other non-pointer word unchanged")
             check(len(paths) == 7 and good and esc == 0,
                   f"{env}: {len(paths)} nj bins re-laid byte-identically: "
                   + ", ".join(f"{n} blobs={nb} strings={ns} mid={m}{'' if g else ' DIFF'}" for n, g, nb, ns, m in res)

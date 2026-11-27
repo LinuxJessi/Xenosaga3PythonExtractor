@@ -55,9 +55,11 @@ can no longer be patched together for chain-0 objects; patch the pair from the
 originals instead), compressed entries (none exist on any known XS3 image),
 growth without ``grow``, the sector ceiling.
 
-Only the ISO9660 side of the ISO9660 + UDF bridge images is kept consistent
-(``disc.py`` docstring, "UDF"): a grown image's UDF anchor and partition, and
-the UDF records of a rewritten ISO9660 file, are left as they were.
+Both halves of the ISO9660 + UDF bridge images are kept consistent: after the
+writes ``Disc.sync_udf`` moves the UDF end anchor (a grown image is one sector
+longer for it), resizes the UDF partition and rewrites the UDF file entry of
+every moved or resized ISO9660 file (``udf.py``, after Anzinono's
+xenosaga3-translation-kit). Verification runs ``udf.check`` on each output.
 
 Output: each source image is cloned (APFS ``clonefile`` on macOS, a reflink
 on Linux, else a hole-preserving stream copy) to ``<out>.partial``, patched,
@@ -385,6 +387,8 @@ def plan_changes(discs: List[Disc], changes: Dict[Key, bytes], grow: bool = Fals
         own = sum(_sectors(len(t.data)) for t in targets
                   if t.disc == i and t.action == "grow" and t.chain != 0)
         n = base[i] + s0 + own
+        if n != ends[i] and d.has_udf():
+            n += 1                                  # the moved UDF end anchor (Disc.sync_udf)
         final.append(n)
         if n > DVD5_SECTORS and d.iso.layer2_pvd_sector is None:
             warnings.append(f"{d.path.name}: grows to {n} sectors, past DVD-5 ({DVD5_SECTORS}), as ONE "
@@ -432,6 +436,7 @@ def _apply(disc: Disc, i: int, plan: Plan) -> None:
             t.lba = disc.append_entry(t.entry, t.data)
         else:
             t.lba = disc.relocate_fs_file(t.path, t.data)
+    disc.sync_udf()                                        # 4. the UDF half follows
 
 
 def _spot_entries(src: Disc, chain: int, skip: set, n: int):
@@ -482,6 +487,10 @@ def verify(srcs: List[Disc], outs: List[Disc], plan: Plan, spot: int = 24) -> Li
         vol_end = o._volume_end_sector()
         if vol_end * SECTOR != o.iso.image_size:
             bad.append(f"{name}: ISO9660 volume {vol_end} sectors != image {o.iso.image_size // SECTOR}")
+        if plan.final[i] * SECTOR != o.iso.image_size:
+            bad.append(f"{name}: image has {o.iso.image_size // SECTOR} sectors, planned {plan.final[i]}")
+        if s.has_udf() and not s.udf_problems():
+            bad += [f"{name}: {p}" for p in o.udf_problems()]
         if o.chains != s.chains:
             bad.append(f"{name}: chains {o.chains} != source {s.chains}")
         for t in mine:
@@ -748,7 +757,8 @@ def _sha(p: Path) -> str:
 
 def _disc_sparse(src: str, dst: Path) -> None:
     """Sparse copy of a real image: system area, root files and X3.00 (everything up to
-    X3.01) plus the story chain's index; holes elsewhere."""
+    X3.01) plus the story chain's index and the last sector (the UDF end anchor);
+    holes elsewhere."""
     from disc import _sparse_copy
     from iso9660 import IsoImage
     with IsoImage(src) as iso:
@@ -756,6 +766,7 @@ def _disc_sparse(src: str, dst: Path) -> None:
         for n in ("X3.10", "X3.20"):
             if n in iso.files:
                 ranges.append((iso.files[n].lba, iso.files[n].size // SECTOR))
+        ranges.append((iso.image_size // SECTOR - 1, 1))
     _sparse_copy(src, dst, ranges)
 
 
@@ -897,6 +908,9 @@ def self_test() -> int:
                       "US pair (sparse): X3.00 identical, 9,867 entries")
                 check(d1.read(c1) == b"A" * 9000 and d2.read(c2) == b"B" * 7000 and d1.lookup(c2) is None,
                       "US pair (sparse): chain-1 grow on D1, chain-2 grow on D2 only")
+                check(d1.udf_problems() == [] == d2.udf_problems() and d1.iso.image_size // SECTOR == 2205067,
+                      "US pair (sparse): UDF partition, integrity table and end anchor follow the grown "
+                      "images (2,205,056 + 10 + 1 anchor sector)")
             # re-patching an already grown pair: appended objects of chain 0 and of the
             # story chain interleave (menutext, c1/c2, then batle_bg); menutext's room
             # must end at c1/c2, not at the next chain-0 start (verifier repro scen3)
@@ -904,14 +918,16 @@ def self_test() -> int:
             patch_copy([o1, o2], td / "o2", {"bat\\us\\batle_bg.sb": b"Z" * 3000}, grow=True, verbose=False)
             with Disc(td / "o2" / s1.name) as d:
                 a = d.allocation(d.lookup("mnu\\us\\menutext.txd")[1])
-            check(a == 10 * SECTOR, f"re-patch: a relocated entry's room ends at the next object of any "
-                  f"chain ({a} bytes = its 10 sectors, c1 follows)")
+            # 10 sectors of its own + the first run's UDF end anchor, dead since the
+            # second run moved the anchor to the new last sector
+            check(a == 11 * SECTOR, f"re-patch: a relocated entry's room ends at the next object of any "
+                  f"chain ({a} bytes = its 10 sectors + the old UDF anchor sector)")
             r = patch_copy([td / "o2" / s1.name, td / "o2" / s2.name], td / "o3",
-                           {"mnu\\us\\menutext.txd": b"M" * 21000}, grow=True, verbose=False)
+                           {"mnu\\us\\menutext.txd": b"M" * 23000}, grow=True, verbose=False)
             with Disc(td / "o3" / s1.name) as d1, Disc(td / "o3" / s2.name) as d2:
                 check(all(x["action"] == "grow" for x in r) and d1.read(c1) == b"A" * 9000
-                      and d2.read(c2) == b"B" * 7000 and d1.read("mnu\\us\\menutext.txd") == b"M" * 21000,
-                      "re-patch: 21,000 B menutext is grown, not written over the chain-1/chain-2 file")
+                      and d2.read(c2) == b"B" * 7000 and d1.read("mnu\\us\\menutext.txd") == b"M" * 23000,
+                      "re-patch: 23,000 B menutext is grown, not written over the chain-1/chain-2 file")
             for k in ("o", "o2", "o3"):
                 shutil.rmtree(td / k, ignore_errors=True)
             with Disc(s1) as d:
