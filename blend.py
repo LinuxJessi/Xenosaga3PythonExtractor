@@ -55,6 +55,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import posixpath
 import platform
 import shutil
 import subprocess
@@ -94,10 +95,12 @@ def candidates(system: Optional[str] = None, env: Optional[Dict[str, str]] = Non
         if env.get(k):
             out.append(env[k])
     if system == "Darwin":
-        for root in ("/Applications", os.path.expanduser("~/Applications")):
-            out.append(os.path.join(root, "Blender.app", "Contents", "MacOS", "Blender"))
-            out += sorted(glob.glob(os.path.join(root, "Blender*.app", "Contents", "MacOS",
-                                                 "Blender")), reverse=True)
+        # posixpath, not os.path: the lookup is also built (and self-tested) on
+        # Windows, where os.path.join would put backslashes in a macOS path
+        for root in ("/Applications", posixpath.expanduser("~/Applications")):
+            out.append(posixpath.join(root, "Blender.app", "Contents", "MacOS", "Blender"))
+            out += sorted(glob.glob(posixpath.join(root, "Blender*.app", "Contents", "MacOS",
+                                                   "Blender")), reverse=True)
     elif system == "Windows":
         roots = [env.get("ProgramFiles", r"C:\Program Files"),
                  env.get("ProgramFiles(x86)", r"C:\Program Files (x86)")]
