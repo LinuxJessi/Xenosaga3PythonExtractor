@@ -7,6 +7,13 @@ images are never written.
 Works on the USA retail discs (SLUS_213.89 / SLUS_214.17), the May 2006
 prototype, and the Japanese retail discs (SLPS_256.40 / SLPS_256.41).
 
+> **There is also an editor.** `python gui.py --editor` (or `translate.command`
+> / `translate.bat` / `translate.sh`) opens a page that lists the same strings
+> by type and by speaker, checks each translation as you type, draws it in
+> the game's font and builds both discs with one button. It uses the rules on
+> this page; a project made there and a tree made here are two ways into the
+> same writer. See [TRANSLATION-EDITOR.md](TRANSLATION-EDITOR.md).
+
 > **Partly checked in the game (2026-11-20).** USA Disc 1 copies written by
 > `text-import` booted in PCSX2 2.9.175 and showed the edits: a same-size
 > `menutext.txd` edit, and a `synopsis.txd` grown past its allocation and
@@ -72,23 +79,34 @@ Counts per disc:
 
 ```
 # cf\us\1210.sb  147 strings  text pool at 0x2AE4 (3664 bytes)  file 16080 bytes
-### 0003 dialogue
+### 0003 dialogue use:box
 Disembark the E.S.?<f>
-### 0004 identifier
+### 0004 identifier use:resource
 ce100_045
-### 0005 dialogue
+### 0005 dialogue use:debug
 ***************************************************
-### 0006 note cp932
+### 0006 note cp932 use:debug
 ＊BGM設定＊
 ```
 
 (an excerpt of the real export of USA Disc 1)
 
+- `use:` (script files, since 2026-11-21) says what the script's **code** does
+  with the string, which the look of a string cannot tell you: `event`, `box`,
+  `npc`, `choice`, `think`, `system`, `battle`, `banner` and `table` are
+  drawn; `keyword` is the word a townsperson waits for; `debug` is only ever
+  handed to the developers' debug print and never shown (73,601 strings on
+  the USA discs, among them 3,797 that look like dialogue, such as `0005`
+  above; 86,561 on Japan); `resource` is an id or a file name; `unused` is
+  never referenced. **Translate the drawn ones and the keywords; skip
+  `use:debug`.**
+
 - Each `### KEY` line starts one string. The line after it is the text.
 - Every block must come back: the same keys, in the same order, none
   missing and none added.
-- The words after the key (`dialogue`, `identifier`, `note cp932`, `fixed`)
-  are for information only. Each string's codec comes from the manifest.
+- The words after the key (`dialogue`, `identifier`, `note cp932`, `fixed`,
+  `use:box`) are for information only: the import reads the key and ignores
+  them. Each string's codec comes from the manifest.
 - Inside a block, a line that starts with `#` is a comment. A string that
   really starts with `#` is written `⟦23⟧`.
 - `⟦XX⟧` is one raw byte. It is written as given and never checked against
@@ -98,7 +116,11 @@ ce100_045
 - Keep the game's own codes as they are:
   - `[Speaker]`, `<lN>` (number of lines), `<wN>` (wait), `<f>` (end of page)
   - `$col…;`, `$ay…;`, `$ruby…;` and the other `$` commands
-  - the `<kWORD>` tags
+  - the `<kWORD>` tags. `WORD` is drawn (it is a townsperson's keyword) and the
+    scene also holds it as a string of its own, which the script hands to
+    `extalk.KeyWait` to wait for that keyword. If you translate the word,
+    change both strings alike ([DIALOGUE.md](DIALOGUE.md); `dialogue` prints
+    the pair together)
 - `identifier` strings are labels and voice ids that the script looks up by
   name. Changing one prints a warning.
 
@@ -192,9 +214,24 @@ any known build, so text-import refuses it.
 
 ## Budgets and growth
 
-**No loader buffer size is known for any XS3 text file.** That covers the
-.sb scripts, .txd tables, mnu .bin databases, Message.Dat, batdat.bin,
-subtitles and .mes files. The US survey lists all of them as open.
+**The loader has no cap of its own, and which buffer each text file gets is
+traced for one file only.** `FUN_00188618` (USA) reads a file at the size
+the disc's index gives, rounded up to 2,048, into the buffer its caller
+passes, and checks nothing. `synopsis.txd` is read to 0x1F00000 with a table
+after it at +0xFFF00, so it may be 1,046,528 bytes (retail: 46,700).
+The callers for the .sb scripts, the other .txd tables, the mnu .bin
+databases, Message.Dat, batdat.bin, the subtitles and the .mes files were
+not followed: their room is unknown.
+
+What IS traced is the dialogue window (2026-11-21;
+[TRANSLATION-EDITOR.md](TRANSLATION-EDITOR.md), "Limits", has the functions):
+the game never wraps, a window is as wide as its widest line plus 43 px
+(32 for a townsperson's balloon and a choice list), and the screen is 512 px
+wide. So `lang encode --width 469` keeps event lines and field boxes on the
+screen, 480 a choice list, and 426 a townsperson's line (balloons are drawn
+at zoom 18; 426 is the zoom-16 width `font-measure` reports). One page of a
+drawn script string is copied into the PS2's 16 KB scratchpad without a
+length check; the editor refuses a string over 16,000 bytes.
 
 So `text-import` refuses any file that would get **larger** than its retail
 size unless you pass `--grow`. With `--grow`:
@@ -225,8 +262,9 @@ These limits are always enforced, `--grow` or not:
   buffer size.
 - `batdat.bin` tables with u16 offsets cannot pass 64 KB, and
   `Message.Dat` on JP (u16 offsets) cannot either.
-- Strings in `DBC2.bin` and `njDataText.bin` marked `fixed` hold a pointer of
-  unknown meaning into their middle, so they cannot change.
+- 14 record values in `DBC2.bin` and `njDataText.bin` happen to land inside a
+  string. They are numbers (ids and counts), not pointers, so they are left as
+  they are and those strings can change like any other (see FORMATS.md, nj).
 
 ## Refusals
 

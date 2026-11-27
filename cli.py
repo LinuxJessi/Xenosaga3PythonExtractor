@@ -29,7 +29,12 @@ They read the USA discs, the May 2006 prototype and the Japan discs:
                                 (textpack.py, align.py)
     text-decode / sb-strings / txd-strings / nj-strings / subtitle-text /
     msgdat-strings / batdat-strings   one container at a time
+    sb / natives                the scene scripts' code: disassembly, the natives they call (sbvm.py)
+    dialogue                    every line in play order, read from the scripts' code (dialogue.py)
     lang scan|encode|import|preview   new scripts in the game fonts (langpack.py)
+    tx-build / tx-catalog / tx-selftest   the translation editor's build, catalog and
+                                disc checks (txbuild.py; the editor itself is `gui --editor`)
+    tx-cache [--clear]          where the editor's cache is, its size; delete it (txcache.py)
     font-extract / font-rebuild / font-measure / font-donor   fonts (font.py)
     glyphs-slots / -coverage / -render / -apply / -unlock     glyph slots (glyphs.py)
     statfont-export / statfont-import   battle HUD letters (statfont.py)
@@ -404,11 +409,13 @@ def cmd_repack_tree(args: argparse.Namespace) -> None:
 # command added to them later is wired without touching this file.
 COMMAND_MODULES = (
     "iso9660", "toc_bin", "chains", "disc", "region", "patch", "repack",
-    "textcodec", "sb", "txd", "njbin", "subtitle", "msgdat", "batdat",
+    "textcodec", "sb", "sbvm", "dialogue", "txd", "njbin", "subtitle", "msgdat", "batdat",
     "textpack", "align", "langpack",
+    "txbuild",
     "font", "glyphs", "statfont",
     "xtx_encode", "imagetext", "chrtex",
     "vif", "gltf", "xhr", "xap", "pxy", "models_sweep", "blend",
+    "adx",
     "gui",
 )
 
@@ -419,13 +426,14 @@ _KIT_MODULES = frozenset(COMMAND_MODULES) | {"chrtex", "xcpack", "textcodec", "m
 
 # Every module with a self_test(); `self-test` imports each one strictly.
 SELF_TESTS = (
-    "iso9660", "toc_bin", "chains", "disc", "region", "patch", "repack",
-    "textcodec", "sb", "txd", "njbin", "subtitle", "msgdat", "batdat",
+    "iso9660", "toc_bin", "chains", "disc", "udf", "region", "patch", "repack",
+    "textcodec", "sb", "sbvm", "dialogue", "txd", "njbin", "subtitle", "msgdat", "batdat",
     "textpack", "align", "langpack",
+    "txbuild",
     "font", "glyphs", "statfont",
     "xtx_decode", "xtx_encode", "imagetext", "chrtex",
     "vif", "gltf", "xhr", "xap", "pxy", "models_sweep", "blend",
-    "browse_bundle", "gui",
+    "adx", "browse_bundle", "gui",
 )
 
 # Import failures met while registering module commands (name -> error).
@@ -563,7 +571,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--kinds",
         help=(
             "Comma-separated bundle categories: images,text,textures,textures_png,"
-            "package_textures,audio,soundbanks,movies,carved,models. Default: all. "
+            "package_textures,audio,music,soundbanks,movies,carved,models. Default: all. "
             "package_textures decodes the textures inside .chr/.wpn/.map packages "
             "and .esd/.esp/.sme effect files (pure Python, several minutes); "
             "models writes every model as .glb plus models.csv."
@@ -763,7 +771,20 @@ def cmd_disasm(args: argparse.Namespace) -> None:
     )
 
 
+def _utf8_output() -> None:
+    """Print UTF-8 whatever the console's code page is. The kit prints
+    Japanese, Arabic and the ⟦XX⟧ escapes; a cp1252 console or pipe on Windows
+    cannot encode them, and the app bundle ignores PYTHONIOENCODING (the
+    Episode II kit's first Windows build crashed on exactly this)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv: List[str] | None = None) -> None:
+    _utf8_output()
     ap = _build_parser()
     if IMPORT_ERRORS:
         # a module that failed to import registered no commands: say why before

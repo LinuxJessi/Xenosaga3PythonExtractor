@@ -43,16 +43,58 @@ built the same way, with code borrowed from both where the formats are shared
 > Reading is tested on all five images. Discs written by the kit have been
 > booted in PCSX2 with English edits, Arabic, Hindi, Amharic, Georgian,
 > Japanese on the USA disc, a grown file and a character recolour (Disc 1,
-> 2026-11-20/21; [docs/UPDATES.md](docs/UPDATES.md) says exactly what). Not
+> 2026-11-20/21), and translation-editor builds in Hindi, Chinese, Cherokee
+> and Arabic (2026-11-21/27; [docs/UPDATES.md](docs/UPDATES.md) says exactly what). Not
 > yet booted: Disc 2 and the disc swap, the Japanese discs, the prototype,
 > imported pictures and the battle HUD letters.
 
-**Contents:** [Models](#models) · [Animation](#animation) ·
+**Contents:** [Translation editor](#the-translation-editor-langkit) ·
+[Models](#models) · [Animation](#animation) ·
 [Translating](#translating-into-another-alphabet) ·
 [Changing textures](#changing-textures) · [Textures in their real colours](#textures-in-their-real-colours) ·
 [Audio samples](#audio-samples) · [Movies, fonts and menus](#movies-fonts-and-menus) ·
 [The window](#the-window) · [What you get](#what-you-get) · [Regions](#regions) ·
 [Commands](#commands) · [Quick start](#quick-start--gui-recommended)
+
+
+## The translation editor (langkit)
+
+Translate the whole game from one page in your browser: pick your discs and a
+language, type, press **Build**, and get patched copies of Disc 1 and Disc 2.
+It knows 382 languages, adds the few letters French or German lack by itself,
+and draws new alphabets (Arabic, Devanagari, Cherokee, Chinese…) into the
+game's own font. Translators can download it **on its own**, without the
+extractor kit. **[A tour with more pictures: docs/LANGKIT.md](docs/LANGKIT.md)**
+
+<table>
+<tr>
+<td colspan="2" align="center"><img src="docs/images/editor/editor-translate-french.jpg" width="820" alt="The translation editor: the opening scene being translated into French, with a preview of the original and the translation drawn with the game's own font"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub>Translating the opening scene into French: every line of both discs, grouped by what it is, checked as you type, previewed in the game's own font</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/images/editor/editor-language-setup-arabic.jpg" width="400" alt="Language setup: Arabic, fonts that have every letter, and a test line drawn right to left"></td>
+<td align="center"><img src="docs/images/editor/editor-by-speaker.jpg" width="400" alt="The By speaker view with KOS-MOS's 87 lines"></td>
+</tr>
+<tr>
+<td align="center"><sub>Language setup: a new script, right to left</sub></td>
+<td align="center"><sub>Browse by speaker</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/images/editor/xs3-ingame-editor-chinese-dialogue.jpg" width="400" alt="Traditional Chinese in the first dialogue box, PCSX2 capture of a disc the editor built"></td>
+<td align="center"><img src="docs/images/editor/xs3-ingame-editor-cherokee-dialogue.jpg" width="400" alt="Cherokee in the first dialogue box, PCSX2 capture of a disc the editor built"></td>
+</tr>
+<tr>
+<td align="center"><sub>Traditional Chinese, from an editor build (PCSX2)</sub></td>
+<td align="center"><sub>Cherokee, from an editor build (PCSX2)</sub></td>
+</tr>
+</table>
+
+Get it: `Xenosaga3-Translation-Editor-<version>-win64.zip` from the releases
+page, `python build.py --editor` for a macOS app, or `translate.command` /
+`translate.bat` / `translate.sh` from a checkout. Reference:
+[docs/TRANSLATION-EDITOR.md](docs/TRANSLATION-EDITOR.md).
 
 ## Models
 
@@ -167,6 +209,27 @@ Hebrew are right to left, with the bidi algorithm checked against ICU.
 Guides: [docs/TRANSLATING.md](docs/TRANSLATING.md) ·
 [docs/SCRIPTS.md](docs/SCRIPTS.md) · [docs/FONT.md](docs/FONT.md).
 
+**The translation editor** (new 2026-11-21, ported from the Episode I kit)
+does all of this from one page. **Translators can download it on its own**
+(`Xenosaga3-Translation-Editor-<version>-win64.zip` on the releases page, or
+`python build.py --editor` for a macOS app): double-click
+`Xenosaga-III-Translation-Editor` and the editor opens, without the
+extractor kit. From a checkout: `translate.command` / `translate.bat` /
+`translate.sh`, or the **Translation editor** button of the app. It lists
+every string of both discs by type and by speaker, checks each translation
+against the disc's fonts as you type, and builds patched copies of Disc 1
+and Disc 2 with one button, in any of 382 languages. Scene-script strings
+are sorted by what the script's code does with them, so the 73,601 debug
+prints of the USA discs are out of the way and a townsperson's keyword stays
+equal to the word in its line. French works with nothing to set up: the
+three letters the USA font lacks (`œ Œ Ÿ`) are added from a font that ships
+with the kit. Dialogue has a width guide read from the game's window code
+(the game never wraps; 469 px keeps a window on the 512 px screen), and
+*Wrap to fit* breaks lines to it. Its builds are read back by the kit, and
+Hindi, Chinese, Cherokee and Arabic builds were booted in PCSX2
+([docs/LANGKIT.md](docs/LANGKIT.md)).
+[docs/TRANSLATION-EDITOR.md](docs/TRANSLATION-EDITOR.md).
+
 The Japanese release is read too: its own codec, font rules and `Message.Dat`
 layout, the 140 scenes that exist only in Japanese listed, and `align-export`
 lines the Japanese script up with the English one (TSV, JSON or a
@@ -268,11 +331,13 @@ in this screenshot are empty stand-ins with the usual file names.
 | Models | all 1,609 models per disc (`.chr` / `.wpn` / `.map` packages and the standalone `.pxy`) as `.glb`: mesh, UVs, textures inside the file, skin weights and a skeleton for the skinned ones (1,014 on each Japanese disc). `blend` turns one into a `.blend` that opens textured, framed and without "bone balls". [docs/BLENDER.md](docs/BLENDER.md), [docs/MODELS.md](docs/MODELS.md) |
 | Japanese discs | detected by the boot executable's hash; 46 executable addresses checked against the code at run time; every Japanese text container reads and rebuilds byte-identically; 140 scenes that exist only in Japanese are listed; `align-export` puts the Japanese and English script side by side (TSV, JSON, dual SRT) |
 | Text | the scene scripts (`.sb`), menu tables (`.txd`), menu databases (`mnu\xx\*.bin`), `Message.Dat`, `batdat.bin`, movie/event subtitles and `.mes` files as one UTF-8 tree. `text-import` checks an edited tree (codec, font ink, sizes) and writes it into copies of Disc 1 + Disc 2. [docs/TRANSLATING.md](docs/TRANSLATING.md) |
+| Dialogue and scene scripts | `dialogue` writes every line the scene and battle scripts show, in the order their code shows it, with speakers, choices, branches and each event line's own voice stream (`--voice`: 4,699 WAV on the USA discs); the subtitles of movies and event scenes appear where the script starts them. `sb` disassembles a script (a 99-opcode byte machine read from the executable) and `natives` lists the 327 engine functions the scripts call. [docs/DIALOGUE.md](docs/DIALOGUE.md) |
 | New scripts | `lang scan / encode / import / preview` draws Arabic, Hebrew, Devanagari or any HarfBuzz-shaped script from a TrueType font into the game's free font cells (123 proportional + 51 wide on USA Disc 1) and encodes the text shaped, wrapped and right-to-left where needed. Japanese on the USA build, with kana and kanji donated from the Japanese font. [docs/SCRIPTS.md](docs/SCRIPTS.md) |
 | Fonts | `font0` / `font1` sheets, metrics and the 8x8 system font out and back in byte-exactly; the rules (pair gate, proportional range) read from each disc's own executable; `font-donor` copies cells between builds; `glyphs-*` finds free slots and renders TTF glyphs. [docs/FONT.md](docs/FONT.md) |
 | Battle HUD letters | `statfont-export / -import`: the HUD's bitmap letters in the window sheets plus their byte and width tables in the executable |
 | Pictures | `image-export / -import`: 1,131 localized pictures on USA Disc 1 (JPEG illustrations, PNG, UI `.xtx` sheets, logo `.tm2`, effect `txy`) to PNG and back at the same size or within the file's sector allocation |
 | Writing back | `patch` writes any set of files into **copies** of one disc or a Disc 1 + Disc 2 pair: in place when a file fits, appended at the image end with `--grow`, with a sector budget, refusals for mixed builds, and a full read-back check. [docs/REPACK.md](docs/REPACK.md) |
+| Music | the soundtrack is 120 recorded ADX streams (3.31 hours, 114 with loop points); `browse --kinds music` writes them as WAV with a table of rates, lengths and loop points, and `music-list` prints that table straight from a disc. Episode III has no sequenced music, so there is no MIDI to export. [docs/MUSIC.md](docs/MUSIC.md) |
 | Browse tree | `browse` builds a folder of things you can open: textures and package textures as PNG, audio and sound banks as WAV, movies as MP4, text as UTF-8 (Japanese read with the Japanese codec), models as `.glb` |
 | Code | the executable and overlays disassembled with string cross-references (`disasm`) |
 
@@ -304,17 +369,70 @@ or a launcher) has a card for every command, grouped by section.
 |---|---|
 | Disc | `region`, `resolve`, `list`, `dump`, `iso-ls`, `toc-check` |
 | Models | `model`, `models`, `blend`, `glb-info` |
+| Dialogue and scripts | `dialogue` (`--voice`), `sb`, `natives` (`--table`) |
 | Text | `text-export`, `text-import`, `text-roundtrip`, `align-export`; one file at a time: `text-decode`, `sb-strings`, `txd-strings`, `nj-strings`, `subtitle-text`, `msgdat-strings`, `batdat-strings` |
+| Translation editor | `gui --editor` (the page), `tx-build`, `tx-catalog`, `tx-selftest`, `tx-cache` |
 | New scripts and fonts | `lang scan` / `encode` / `import` / `preview`, `font-extract`, `font-rebuild`, `font-measure`, `font-donor`, `glyphs-slots`, `glyphs-coverage`, `glyphs-render`, `glyphs-apply`, `glyphs-unlock`, `statfont-export`, `statfont-import` |
 | Pictures | `image-export`, `image-import`, `xtx-export`, `xtx-encode`, `chr-decode`, `chr-palettes`, `chr-import-palettes`, `chr-import-entry`, `chr-recolor`, `xc-unpack` |
 | Writing to discs | `patch` (copies, pairs, `--grow`); older in-place single-ISO tools: `repack-info`, `repack-extract`, `repack-patch`, `repack-tree`, `chr-iso-extract`, `chr-iso-patch`, `chr-iso-sweep` |
-| Browse and code | `browse`, `code-extract`, `disasm` |
+| Browse, music and code | `browse`, `music-list`, `code-extract`, `disasm` |
 | 7-Zip pipeline (USA discs) | `prep`, `lba-from-iso`, `container-map`, `map-regions`, `toc`, `scan`, `extract`, `verify`, `doctor` |
-| Kit | `self-test`, `gui` |
+| Kit | `self-test`, `gui`; `python build.py` builds the app bundle and runs its self-tests |
 
 `python cli.py self-test` runs every module's self-test. Set `XS3_D1`,
 `XS3_D2`, `XS3_PROTO`, `XS3_JP1` and `XS3_JP2` to your ISO paths to include
 the disc checks.
+
+## What's new — 2026-11-26 (lessons from a sibling kit)
+
+Two fixes taken from Anzinono's
+[xenosaga3-translation-kit](https://github.com/Anzinono/xenosaga3-translation-kit),
+a German translation kit for the USA discs (see [Credits](#credits)):
+
+* **UDF stays in step when a disc grows.** `patch` used to fix only the
+  ISO9660 side of these ISO9660 + UDF discs. Now the UDF end anchor, the
+  partition size, the integrity table and the file entry of every moved
+  ISO9660 file are rewritten too (`udf.py`), so tools that mount or burn
+  through UDF see the same files. A grown image is one sector longer for the
+  moved anchor. Checked on all four known images and with pycdlib's UDF
+  reader ([docs/REPACK.md](docs/REPACK.md)).
+* **Database ids are no longer rewritten.** 14 values in `DBC2.bin` and
+  `njDataText.bin` that happen to land inside a string are numbers (DBF fields
+  7/8 hold ids), not pointers. The kit used to move them along with their string,
+  which changed the ids after any earlier edit, and it refused to let those
+  strings change. Now the numbers stay as they are and the strings can be
+  edited ([docs/FORMATS.md](docs/FORMATS.md), section nj).
+
+## What's new — 2026-11-21 (the scene scripts as programs)
+
+The scripts' code is read, not only their text
+([docs/UPDATES.md](docs/UPDATES.md), [docs/DIALOGUE.md](docs/DIALOGUE.md)):
+
+* **`dialogue`**: every line in play order, one transcript per scene, read
+  from what the code does. A string is a line when it reaches a function that
+  draws text; the developers' debug prints (most of every text pool) are left
+  out.
+* **A voice clip per line.** Each event line names its own stream
+  (`snd\adx\mev\<id>.adx`); `dialogue --voice` writes them as WAV.
+* **`sb`** and **`natives`**: a disassembler for the 99-opcode script machine
+  and the list of the 327 functions it calls, both read from the executable
+  and checked on all five disc images (every script disassembles end to end).
+
+## What's new — 2026-11-21 (parity pass)
+
+A parity pass against the Xenosaga I and II kits
+([docs/UPDATES.md](docs/UPDATES.md) has the details and what was checked):
+
+* **The soundtrack on its own.** `browse --kinds music` and `music-list`: the
+  120 music streams with their loop points ([docs/MUSIC.md](docs/MUSIC.md)).
+* **`build.py`**, as in the other two kits: one command builds the app
+  bundle (now also a macOS `.app`) and runs the bundle's own self-tests.
+  Running it found that the bundled `xeno-cli` refused every command; fixed.
+* **The same set of documents as the other kits:**
+  [BROWSING](docs/BROWSING.md), [MODDING](docs/MODDING.md),
+  [MUSIC](docs/MUSIC.md), [FORMATS](docs/FORMATS.md),
+  [CODEBASE](docs/CODEBASE.md), [FINDS](docs/FINDS.md) and
+  [HISTORY](docs/HISTORY.md).
 
 ## What's new — 2026-11-20/21
 
@@ -393,6 +511,16 @@ writes it (`<lN>` = portrait/line slot, `<wNN>` = wait in frames):
 [Corel]<l2>Singing?<w15> That's odd.<w15>\nI wonder what the cause is.<w45>
 [Owusu]<l3>There's this girl who's always\ngrowing flowers at that hospital\nup ahead!<w45>
 [Emil]<l2>She's weird.<w15> She spends\nall her time at a hospital!<w45>
+```
+
+`dialogue` writes a scene as a play script, in the order its code shows the
+lines. The opening (`cf/8000`), each line with its voice clip:
+
+```
+== evt01 ==
+  Blue Testament: Looks like things are going smoothly.  [#0114]  <s000200_01vir>
+  Blue Testament: Tch. You're as friendly as ever.  [#0116]  <s000200_02vir>
+  Red Testament: We must correct the errors.  [#0124]  <s000200_04_2kev>
 ```
 
 The same file carries the writers' Japanese scene index
@@ -697,7 +825,7 @@ The direct-from-ISO commands are listed under [Commands](#commands) above.
 | `scan`          | Walks every LBA row, resolves to `(container, local_offset)`, writes manifest. |
 | `extract`       | Slice bytes per the manifest into a mirrored tree. |
 | `verify`        | Cross-check extracted file sizes (and optionally SHA-1) against the manifest. |
-| `browse`        | Build a sibling `browse/` tree. Categories (`--kinds`): `images` (JPG copy), `text` (TXT/MES/T copy plus a UTF-8 `*.utf8.txt` reading of subtitles and `.mes`, `.txd` menu-text tables decoded, `.sb` scene scripts, `mnu\xx\*.bin` databases, `Message.Dat` and `batdat.bin` parsed to `*.strings.txt` with the build's codec; on a Japanese dump the JP-only scenes are listed in `text/JP-ONLY.txt`), `textures` (XTX/TM2/TXY/BMP/PNG raw copy), `textures_png` (XTX/TM2 → PNG decode, Pillow needed), `package_textures` (every texture inside `.chr`/`.wpn`/`.map` packages and `.esd`/`.esp`/`.sme` effect files → PNG + `package_textures.csv`, pure Python), `audio` (ADX → WAV, ffmpeg), `soundbanks` (DAP → per-cue WAV, incl. the banks inside `.sme`), `movies` (SFD → H.264 MP4, ffmpeg), `carved` (JPGs carved from `credit.bin`-style containers), `models` (every model as `.glb` + `models.csv`). `--region auto\|us\|proto_2006_05\|jp` picks the text readers (auto: the dump's boot executable, else its language folder). |
+| `browse`        | Build a sibling `browse/` tree. Categories (`--kinds`): `images` (JPG copy), `text` (TXT/MES/T copy plus a UTF-8 `*.utf8.txt` reading of subtitles and `.mes`, `.txd` menu-text tables decoded, `.sb` scene scripts, `mnu\xx\*.bin` databases, `Message.Dat` and `batdat.bin` parsed to `*.strings.txt` with the build's codec; on a Japanese dump the JP-only scenes are listed in `text/JP-ONLY.txt`), `textures` (XTX/TM2/TXY/BMP/PNG raw copy), `textures_png` (XTX/TM2 → PNG decode, Pillow needed), `package_textures` (every texture inside `.chr`/`.wpn`/`.map` packages and `.esd`/`.esp`/`.sme` effect files → PNG + `package_textures.csv`, pure Python), `audio` (ADX → WAV, ffmpeg), `music` (the 120 soundtrack streams → `music/*.wav` + `music.csv` with loop points; with it on, they are not written under `audio/` as well), `soundbanks` (DAP → per-cue WAV, incl. the banks inside `.sme`), `movies` (SFD → H.264 MP4, ffmpeg), `carved` (JPGs carved from `credit.bin`-style containers), `models` (every model as `.glb` + `models.csv`). `--region auto\|us\|proto_2006_05\|jp` picks the text readers (auto: the dump's boot executable, else its language folder). |
 | `code-extract`  | Run 7-Zip over the ISO to pull the non-X3 files (SLUS, OVL, IRX, SYSTEM.CNF) into a directory. |
 | `disasm`        | MIPS R5900 disassembly + `lui`/`addiu` string xrefs for SLUS / OVL ELFs. Needs `capstone`. |
 
@@ -769,6 +897,17 @@ chmod +x ~/.local/bin/7z
 
 `7z.exe` reaches WSL paths via `\\wsl.localhost\<distro>\...` if you ever
 need to pass them manually.
+
+## Credits
+
+* **Anzinono**: [xenosaga3-translation-kit](https://github.com/Anzinono/xenosaga3-translation-kit)
+  (MIT). `udf.py` ports its UDF descriptor handling (CRC-CCITT, tag fix-up,
+  partition/integrity/anchor offsets) from `tools/x3rebuild.py`. Its database
+  notes (`docs/formats/datenbank.md`, DBF string fields 3, 5 and 9-14) confirmed
+  that the 14 mid-string values in `DBC2.bin` / `njDataText.bin` are numbers.
+  That kit's `xtx.py` is in turn based on this kit's `xtx_decode.py`.
+* **Lybac**: the original Xenosaga III unpack/repack tools, whose LBA lists
+  (`lba/`) this kit started from.
 
 ## FAQ
 

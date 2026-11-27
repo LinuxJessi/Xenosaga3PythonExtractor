@@ -47,6 +47,17 @@ The tree is described in [TRANSLATING.md](TRANSLATING.md). It contains:
   `Message.Dat` and `batdat.bin`;
 - whole files for subtitles and `.mes` messages.
 
+To read a scene before translating it, `python cli.py dialogue --iso D1.iso
+--iso D2.iso --out lines/` writes each script's lines in the order its code
+shows them, each with its block number (`[#0114]` is `### 0114`). Two things
+it shows that the tree does not ([DIALOGUE.md](DIALOGUE.md)):
+
+- a townsperson's keyword is stored twice, inside the line as `<knot ready>`
+  and alone as `not ready`, and the script matches them as text: translate
+  both the same way;
+- many `dialogue` blocks of a scene (`--- main ---`, `start`) are the
+  developers' debug prints and never reach the screen.
+
 Write the translation in **logical order**, the way you type it. Do not reverse
 anything, do not type presentation forms, and only break lines where you want a
 break.
@@ -346,19 +357,31 @@ A code that lands on the wrong cell shows up wrong in the image.
 It also prints the encoded text and each line's width. The faint vertical line
 marks `--width`.
 
-## 6. Boot it (not done yet)
+## 6. Boot it
 
-This has not been checked:
-- that the printer's draw offset for proportional images matches the preview's
-  `pen + 1 - left`. If it does not, joined Arabic will show hairline gaps or
-  overlaps, and `--spacing ink` is the fallback;
-- whether the engine wraps proportional text itself, and at what width;
-- whether `[Name]` prefixes are drawn from the text you wrote;
-- that the unlocked executables boot;
-- whether grown or appended text objects load (TRANSLATING.md).
+Three builds made with these commands were booted in PCSX2 on 2026-11-20
+(Disc 1 of each; the table, commands and captures are the seventh pass in
+[UPDATES.md](UPDATES.md)):
 
-The first boot should check a short line in an early scene, such as
-`cf\us\1010.sb` #0001 ("Board the E.S.?"), before anything long.
+- **Arabic** (68 new proportional glyphs, right-aligned): joined
+  right-to-left text on the synopsis screen, the field menu and in scene
+  dialogue;
+- **Japanese on the USA disc** with `--unlock jp`: the unlocked executables
+  boot, and kana, kanji and full-width punctuation draw;
+- **a grown text file**, appended past its allocation with `--grow`: it loads
+  from its new place.
+
+Still not checked:
+- whether the engine wraps proportional text itself, and at what width. The
+  dialogue box is wider than the `--width 300` used for the Arabic build, and
+  its width has not been measured;
+- the page-wait marker in right-aligned dialogue, which is drawn where the pen
+  stops, against the first Arabic letter;
+- Disc 2 of any build, the Japanese discs and the prototype as targets;
+- any script other than Arabic and Japanese in the running game.
+
+A first boot of a new language should check a short line in an early scene,
+such as `cf\us\1010.sb` #0001 ("Board the E.S.?"), before anything long.
 
 ## Exit tests (2026-11-20)
 

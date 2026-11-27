@@ -5,6 +5,436 @@ to benefit from it. (Same convention as the Xenosaga I kit's
 `docs/UPDATES.md`; this file starts with the first improvement run ported
 back from that project.)
 
+## 2026-11-27 — Chinese, Japanese and Korean glyphs fit the cell; the langkit page
+
+* **No more thin lines between Chinese characters.** New-script Han, kana
+  and Hangul were drawn at px 20, the size used for other scripts. That
+  fills the 20 x 24 font cell edge to edge, and in PCSX2 the game's filtered
+  draw showed thin vertical lines between characters. They now default to
+  px 17 on baseline 17 (`txtarget.RENDER`), close to the Japanese retail
+  kanji, which sit in rows 4-18 and columns 1-18. A Traditional Chinese
+  build was booted again: the lines are gone. *To benefit:* build again. A
+  project that names its own `px` keeps it.
+* **docs/LANGKIT.md**: a translator's tour of the editor with screenshots,
+  plus PCSX2 captures of editor builds in Hindi, Chinese, Cherokee and
+  Arabic. The front page has a langkit section. The editor docs no longer say
+  that no editor build has been booted.
+* The stand-alone editor app was rebuilt with every 2026-11-26 fix; its
+  bundled self-tests pass.
+
+## 2026-11-26 — Translation editor brought to the Episode I standard
+
+A parity review against the Episode I editor (by hand in Chrome, plus two
+outside models), then fixes. Details: `docs/TRANSLATION-EDITOR.md`.
+
+**What changed**
+
+* **French and German no longer stop at Language setup.** The page said
+  "nothing to choose" (the kit's DejaVu Sans draws the few missing letters)
+  and then refused *Next* until a font was picked. It now goes straight on;
+  the step bar and the preview name the kit's font.
+* ***Wrap to fit* works for those languages too** (it did nothing for any
+  language not fully in the game font, which on these discs includes French).
+* **Disc picker:** the list of discs found no longer pushes Cancel/Select out
+  of the window; each disc says USA or Japan; the May 2006 prototype is listed
+  apart, not ticked as an untouched disc.
+* **The GUI keeps one port, 21389**, so the editor remembers your disc and
+  project between launches (`PORT=` / `--port` still pin another).
+* **Saving can no longer cross projects or race a build;** the server refuses
+  saves that would replace or recreate a project file unseen, and restores
+  over a file another tab changed.
+* **Check project** (next to Build): the build's own checks over the whole
+  project, nothing written; Build runs it first.
+* **TSV import checks before it changes anything**, and makes a checkpoint when
+  it replaces translations. Export refuses another disc set's project.
+* Japan discs: the source is named Japanese, and the "Japanese source" option
+  (meant for USA discs) is off. Build uses the disc whose lines are loaded.
+  Episode I wording removed ("Build ISO", one disc, Woglinde).
+* Server: a first read of a disc set no longer blocks every other request;
+  the alignment, length-guide and disc-detection caches follow both discs of
+  a set.
+
+* **The Translation Editor is its own download** (`packaging/translation-editor.spec`,
+  `python build.py --editor`, a second zip in the Windows release): double-click
+  `Xenosaga-III-Translation-Editor` and the editor opens, with no extractor
+  cards and nothing else to install. On macOS it is a real app now, not a
+  launcher that needed the Extractor app beside it.
+* Bundled builds stream their log: the bundled CLI is unbuffered (a frozen
+  program ignores `PYTHONUNBUFFERED`, so the Build log stayed empty until the
+  end).
+* Disc picker says "Retail discs found" and what that check covers; discs it
+  could not check are listed as such, not as changed copies. Hidden lines are
+  refused when the discs changed between the two catalog reads.
+* Second review round (by hand, plus an independent model review):
+  * **A failed save no longer traps the project.** A disk or connection fault
+    is retried by itself (5 s up to 1 min). A merge with another tab no longer
+    makes Open/Build refuse once. A project file deleted or moved while open
+    offers *Save it again here*.
+  * **Build stops when another project is opened during its pre-checks**, and
+    when the whole-project check could not run. Errors found by *Check
+    project* are replaced on every run, not kept after the line is fixed.
+    "Your disc is ready" follows the project's path, so a Restore mid-build
+    keeps it.
+  * **A project made while only one disc was found** can move to the pair once
+    both are found (*Use both discs* in the banner; nothing is lost), and the
+    build's refusal says so instead of "different disc set".
+  * Opening Disc 2 of a set reads the same catalog as Disc 1 (one entry, not
+    two). A request naming a disc that no longer exists is refused instead of
+    answered with the USA rules. The language state is resolved for the disc
+    that was opened (French lacks every accent on the Japan discs), and the
+    language list is kept per disc read, not per path.
+  * TSV import keeps lines whose text is already the same (their *done* state
+    is no longer reset to draft), and is checked again if the project changed
+    between *Check* and *Import*.
+  * The home port is kept after a quick restart (the port probe ignored the
+    old socket's TIME_WAIT).
+  * Episode I code removed: one-line mail/database fields, menu-name guides,
+    the `evt`/`chat` tag handling, ribbon and battle font labels, `/[...]` in
+    the group-paste instructions.
+
+**What you have to do:** nothing. Projects made earlier open as before.
+
+## 2026-11-26 — UDF kept in step; database ids left alone
+
+Two lessons from Anzinono's
+[xenosaga3-translation-kit](https://github.com/Anzinono/xenosaga3-translation-kit)
+(MIT, German translation kit for the USA discs; its `xtx.py` is based on
+this kit's `xtx_decode.py`).
+
+**What changed**
+
+* **`udf.py`, `Disc.sync_udf`, `Disc.udf_problems`.** After the writes, `patch`
+  rewrites the UDF half of the ISO9660 + UDF image: end anchor in the last
+  sector (a grown image gains one sector for it), partition length in both
+  descriptor sequences, the integrity table's size, and the file entry
+  (position, length, recorded blocks) of every moved or resized ISO9660 file,
+  each with a new tag checksum and CRC-CCITT. The descriptor code is ported
+  from that kit's `tools/x3rebuild.py`. The live end anchor counts as an
+  object, so a relocated entry cannot grow in place over it. Verification
+  now runs `udf.check` on every output and compares the image size with the
+  plan.
+* **`njbin.py`: values that land inside a string are numbers.** The 14 such
+  values on USA Disc 1 (DBC2 `DBF` fields 7/8, njDataText `CHA` field 2 and
+  `TOP` field 4) sit in columns that never point at text. The kit used to
+  treat them as pointers: they moved whenever an earlier string changed,
+  which rewrote the DBC2 ids, and the strings they landed in could not change.
+  Now they are kept byte for byte and every string is editable.
+
+**Checked:** `udf.check` passes on USA Disc 1/2, Japan Disc 1 and the
+prototype, untouched. A USA pair patched with `OV01.OVL` grown to 326,120
+bytes and `menutext.txd` grown passes it, and pycdlib's independent UDF
+reader returns all 22 files with the same bytes as ISO9660. `njbin` re-lays
+all seven nj files byte-identically on USA, Japan and the prototype. With
+every DBC2 string longer, every non-pointer word stays the same.
+`cli.py self-test`: 38/38 modules. **Not done:** these outputs were not
+booted in PCSX2. The game reads ISO9660 only, which did not change apart from
+the one extra sector.
+
+**What you do:** nothing. Re-patch from the originals if a disc you built
+earlier has to mount through UDF, or if you edited DBC2 text with an earlier
+version (those ids were moved).
+
+## 2026-11-21 — the translation editor: five things to know, fixed
+
+The port's report ended with five "things to know before using it". Each is
+fixed here. Reference: [TRANSLATION-EDITOR.md](TRANSLATION-EDITOR.md).
+
+**What changed**
+
+* **French is ready on the USA discs.** The USA font is Latin-1 and has no
+  `œ Œ Ÿ`. A Latin-script language that lacks a few letters on the open disc
+  now builds with nothing to choose: the build takes the missing letters from
+  DejaVu Sans, which ships in `fonts/` with its licence (the same glyphs on
+  every machine), or from the best installed font when DejaVu lacks one. The
+  language list says so per disc (*ready · a few letters added*: 123
+  languages on the USA discs, among them German, Polish, Czech and Turkish),
+  the log names the font and the letters, and the checks and previews use the
+  same font. A font named in the project still wins. French is the page's
+  default language again.
+* **Width guides and one byte limit, read from the game's window code.** The
+  game never wraps dialogue: a message window is as wide as its widest line
+  plus 43 px, and the screen is 512 px wide. So event lines, field boxes,
+  narration and system messages have a guide of 469 px, choices 480, and a
+  townsperson's line 426 (balloons are drawn at zoom 18). *Wrap to fit* now
+  breaks lines to the guide. A drawn script string over 16,000 bytes is
+  refused: the game copies a page into the PS2's 16 KB scratchpad without
+  checking. Menus, the database, battle text, subtitles and every file's
+  load buffer but one are **not** traced and the editor says "none known"
+  there, as before. The table with every function is in
+  TRANSLATION-EDITOR.md, "Limits".
+* **Script strings are sorted by what the code does with them.** The sb
+  family now asks `dialogue.string_kinds` (the script VM read on the same
+  day) instead of looking at a string's shape. On the USA discs 3,797 debug
+  prints that looked like dialogue are no longer offered (73,601 debug
+  prints hidden in all); on the Japanese discs the 85,372-row "Scene text
+  without a speaker" bucket is gone: 86,561 debug prints are hidden and
+  13,235 drawn strings are offered in their own categories. `text-export`
+  writes the same word on each `### KEY` line (`use:debug`, `use:box`…).
+* **Keywords cannot drift from their lines.** A townsperson's keyword
+  (`extalk.KeyWait`) must equal the body of a `<kWORD>` tag in its line. The
+  534 keyword rows (1,054 on Japan) are locked; you translate the word inside
+  the tag and the build writes the keyword from it, on both build paths, and
+  compares the bytes on the finished copies. A removed tag, or one keyword
+  written two ways, is refused before anything is written. A new-letter
+  build can now put new letters inside a keyword (`<kcœur>`), which the
+  new-script pipeline could not encode before; for right-to-left or wrapped
+  text that is still refused, with the reason.
+* **Two tabs on different builds no longer cross over.** The "disc that is
+  open" was one global, set by whichever request came last. It is now a
+  scope of the request (`txcodec.disc`, a context variable), the server runs
+  each request inside the scope of the disc it names, the permission to
+  write new-letter codes is scoped the same way, and a request that names no
+  disc while two sets are open is refused.
+* **The cache behaves.** `txcache.py`: the platform's cache folder
+  (`~/Library/Caches/xs3-txeditor` on macOS) or a sub-folder of
+  `$XS3_TX_CACHE`, never the kit's folder or a disc's; gzip (a catalog is 3 MB where it was 43); keyed
+  by the disc set's executables, indexes **and text bytes** plus the code's
+  hash, so a patched copy or a newer kit never reads an old entry; pruned to
+  6 disc sets, 6 pairings, 300 MB and 60 days. The page shows its place and
+  size and clears it (**Bulk ▾**); `tx-cache [--clear]` does the same.
+
+**What you have to do.** Nothing to install. The first start reads each disc
+set again (half a minute; a minute for the Japanese discs) and removes the
+86 MB the earlier version left in `~/.cache/xs3-txeditor`. A project made
+before today opens as it is; a translation typed for a debug print still
+builds, and one typed directly into a keyword row is refused with the line
+to edit instead.
+
+**Second opinion.** The plan and then the code were reviewed by a second
+model (GPT Astra); its findings were checked against the code and the discs
+before any was acted on. Found that way and fixed: the new-letter build
+path skipped the row rules entirely; a language table computed at import
+could take the Japanese disc's answers; a preview pack was reused for text
+with the same letters in another order (wrong for Arabic); a lone disc
+stayed lone after its partner appeared; two source images with one file
+name would have been written over each other; letters inside a `<k…>` tag
+were not counted, and the tag's word was left out of a line's width;
+*Wrap to fit* could have broken one option of a choice into two; a dropped
+control byte was an error in the editor but not in a build; a new-letter
+build found a too-long string only after writing. What it found and was
+left alone is in the list the review was reported with, not hidden here:
+the build's lock file can be raced by two processes, and a project made on
+an untouched set still builds on a copy patched in place at the same sizes
+(the retail id cannot see that; the cache key now can).
+
+**Not checked:** in the game, and in a browser. The width guides are read
+from code and agree with the retail text (11 of 9,783 USA strings and 3 of
+12,986 Japanese ones are wider), but no translated line was looked at on
+screen. macOS only.
+
+## 2026-11-21 — the translation editor, ported from the Episode I kit
+
+The other gap the parity pass left open. Full reference:
+[TRANSLATION-EDITOR.md](TRANSLATION-EDITOR.md).
+
+**What changed**
+
+* **A translation editor in the app** (`/editor`): every string of both discs
+  in one list (104,003 rows on the USA discs, 22,920 offered by default),
+  sorted by what it is and by who says it; you type translations, each one is
+  checked against the disc's own fonts as you go and drawn in the game's
+  font; **Build** writes patched copies of Disc 1 and Disc 2 together.
+  Start it with `translate.command` / `translate.bat` / `translate.sh`,
+  `python gui.py --editor`, the **Translation editor** button of the app, or
+  the bundle's `Xenosaga-III-Translation-Editor`.
+* **New commands:** `tx-build` (what the Build button runs), `tx-catalog`
+  (the editor's list as JSON), `tx-selftest` (every check on your own discs,
+  builds on clones included).
+* **Any language.** The language list, the font picker and the project file
+  are the Episode I editor's. A language the disc's fonts can already write
+  (Spanish, Italian, Portuguese… on the USA discs; Japanese and Russian on
+  the Japanese discs) builds with `text-import`'s rules. Any other language
+  builds through `lang scan` / `encode` / `import` with a font from your
+  computer, without touching a command line. French needs a font on the USA
+  discs for three letters: Latin-1 has no `œ Œ Ÿ`.
+* **One project covers both discs.** Give either disc; the other is found
+  next to it (`txdiscs.py`).
+* **The Japanese original beside the English** for a project on the USA
+  discs (`txsource.py`, on `align.py`): 17,548 of the 22,920 offered rows.
+
+**How it was ported.** The page, the server, the project file, the backups,
+the language registry and the catalog are the Episode I files with a counted
+list of small edits (51 strings in the page, 19 places in the server, 6 in
+the catalog, 4 in the project module; `txbackup.py` and `txlangs.py` are
+byte-identical). Everything specific to a game sits behind them:
+`txcodec.py`, `txtarget.py`'s build half, `txsource.py`, `txdiscs.py` and
+the four families, which are thin wrappers over this kit's own `textpack`
+kinds (`txfam_core.py`). The edits to the shared files are listed in
+TRANSLATION-EDITOR.md, "Modules", so they can be folded back into Episode I.
+
+**What was checked** (real images, clones deleted afterwards; the table is in
+TRANSLATION-EDITOR.md):
+
+* an unedited project builds copies that are byte-identical to both retail
+  images (whole-image sha1), USA and Japan;
+* edits in every family and in each disc's own subtitles read back as typed,
+  and only the planned objects differ from retail;
+* a Russian project on the USA discs and a French one on the Japanese discs
+  build through `langpack`, and a line is drawn back from the patched disc's
+  own font;
+* the app's server was driven end to end over HTTP: page, catalog, check,
+  preview, project, the Build job, read-back.
+
+**Not checked:** nothing built by the editor has been booted in PCSX2, and
+the page has not been looked at in a browser. It ran on macOS only.
+
+**What you have to do.** Nothing new to install. `python cli.py tx-selftest
+--iso "Disc 1.iso" --jp "JP Disc 1.iso"` repeats the checks on your discs.
+
+## 2026-11-21 — the scene scripts as programs: disassembly, natives, dialogue in play order
+
+The gap the parity pass left open under "Scene scripts as programs" is
+closed. Until now this kit read a `.sb` file's text pool and nothing else.
+
+**What changed**
+
+* **The script machine is read** (`sbvm.py`, new). Episode III's `.sb` code is
+  a stack machine of 99 one-byte opcodes with big-endian operands, the
+  successor of Episode II's 16-bit-word machine. The interpreter
+  (`FUN_001d2738` on USA Disc 1), its handler table (`0x407b70`) and its
+  length table (`0x407b08`) were found in the boot executable and every
+  handler read. [FORMATS.md](FORMATS.md) section 7 has the table.
+* **`sb`** disassembles one script, from a disc (`--iso`, `--path`) or a local
+  file: labels, natives by name, each string beside the instruction that
+  pushes it.
+* **`natives`** lists every native the scripts call, with call counts, the
+  number of scripts and the argument types seen; `--out` also writes one
+  listing per script. `natives --table --iso DISC.iso` reads the registered
+  natives (22 classes, 327 functions, names and minimum argument counts) from
+  that disc's own executable; without `--iso` it prints the kit's copy
+  (`sbnatives.py`).
+* **`dialogue`** (`dialogue.py`, new) writes every line the scripts show, in
+  the order their code shows it: one transcript per scene and battle script,
+  branches kept, and `dialogue.csv`. A line is a string that reaches a native
+  which draws text (`talk.EvtMsg`, `talk.Msg`, `extalk.Msg`, `talk.Sel`, ...),
+  so the developers' debug prints are left out. [DIALOGUE.md](DIALOGUE.md).
+* **Voice per line.** The third argument of `talk.EvtMsg` is the line's voice
+  clip, and it is a file: `snd\adx\mev\<id>.adx`, one stream per line (4,738
+  of 4,738 on the USA discs, 5,095 of 5,096 on Japan). `dialogue --voice`
+  writes each as a WAV. Movies and event scenes a script starts are looked up
+  too and their subtitle files are listed in place.
+* **GUI:** cards for `dialogue`, `sb` and `natives` under Text & translation.
+
+**What was checked** (five images: USA Disc 1 and 2, the May 2006 prototype,
+Japan Disc 1 and 2)
+
+* every script disassembles from pc 0 to exactly its code size with no unknown
+  byte: 715 / 715 (USA, prototype), 856 / 856 (Japan); 3,225,706 instructions
+  on USA Disc 1; no jump, switch arm, entry or `main` off an instruction;
+* every import of every script is one of the 327 registered natives, and the
+  327 are read from each build's own executable by content, with the same
+  names and minimum argument counts in all five;
+* all 550,358 native calls on USA Disc 1 have their argument lists recovered,
+  none below its native's minimum;
+* every pool string is accounted for: 90,580 = 90,535 named by a `pushtext` +
+  45 read through a global table;
+* against the existing shape-based roles of `text-export` (USA Disc 1): every
+  string a show native draws (9,974) has the role `dialogue` or
+  `untranslated`; of the 14,161 strings with those roles, 3,797 only ever
+  reach `deb.put`, the debug print, and 330 are keywords.
+
+**Worth knowing if you translate**
+
+* `extalk.KeyWait("not ready")` waits for the keyword that a townsperson's
+  line marks as `<knot ready>`. The two strings are separate pool entries and
+  must be changed alike (576 of 576 calls on the USA discs name a `<k...>` tag
+  of the same script).
+* About 3,800 `dialogue` blocks of a USA `text-export` tree are debug prints
+  (`--- main ---`). They are harmless to translate and never drawn.
+  `dialogue.string_kinds` says which is which; `text-export` does not use it
+  yet.
+
+**Not done**
+
+* what most natives do: only the text-showing handlers were read;
+* the numeric arguments of `talk.EvtMsg`, so event lines have a voice clip but
+  no timing;
+* the handlers of the battle natives (`bat`, `robo`, in OV02.OVL);
+* `text-export` roles still come from the shape of a string.
+
+**What you have to do**
+
+Nothing for existing work. New commands:
+
+```sh
+python cli.py dialogue --iso D1.iso --iso D2.iso --out lines/ [--voice]
+python cli.py sb --iso D1.iso --path "cf\us\8000.sb"
+python cli.py natives --iso D1.iso --iso D2.iso --out natives/
+```
+
+## 2026-11-21 — parity with the Xenosaga I and II kits: music, `build.py`, the missing documents
+
+A comparison of the three kits, command by command and document by document,
+and the gaps on this side that could be closed and checked on the real discs.
+
+**What changed**
+
+* **`browse --kinds music` and `music-list`** (`adx.py`, new). Episode I and II
+  have sequenced music and their kits render it; Episode III's music is
+  recorded, 120 ADX streams directly in `snd\adx\`. They now come out on their
+  own: `music/<name>.wav` plus `music/music.csv` (sample rate, channels,
+  length, and the loop start and end read from each stream's header).
+  `music-list --iso DISC.iso [--csv FILE]` prints the same table from a disc
+  without extracting anything. [MUSIC.md](MUSIC.md).
+* **`build.py`** (new), the same command the other two kits have: it renders
+  the version resources, makes the placeholder icon, runs PyInstaller and then
+  runs `xeno-cli self-test` and `gui --self-test` **from the finished bundle**.
+  The spec also wraps the folder in `Xenosaga-III-Extractor.app` on macOS, and
+  the release workflow now calls `build.py`.
+* **Kit bug found by running the bundle, and fixed.** A `xeno-cli` built from
+  the spec as it stood since the 2026-11-20 parity work answered every command
+  with `cannot load gui.py: No module named 'gui'`: `gui` is a command module,
+  `cli.py` refuses to run while one cannot import, and the spec left it out of
+  the CLI program. The window drives that program, so the pre-built app could
+  not have run a single card. The release workflow built the bundle on every
+  push but never ran it. `gui` is now bundled; `pkg_resources` / `setuptools`
+  are excluded (an older setuptools' start-up hook stopped the bundle with
+  "The 'appdirs' package is required").
+* **UTF-8 output on any console** (`cli.py`), the fix the Episode II kit needed
+  on Windows: the kit prints Japanese, Arabic and `⟦XX⟧` escapes, and a cp1252
+  console cannot encode them.
+* **Documents the other kits had and this one lacked:**
+  [BROWSING.md](BROWSING.md), [MODDING.md](MODDING.md) (one table of
+  everything that can be changed and how far each was checked),
+  [MUSIC.md](MUSIC.md), [FORMATS.md](FORMATS.md), [CODEBASE.md](CODEBASE.md),
+  [FINDS.md](FINDS.md) (the catalog's "Fun finds", moved, plus what the
+  prototype and the Japanese discs added) and [HISTORY.md](HISTORY.md) (build
+  and mastering dates read from each image).
+* **Stale statements corrected:** `docs/README.md` still said no disc written
+  by the kit had been booted; `SCRIPTS.md` section 6 was still "Boot it (not
+  done yet)"; `disc-catalog.md` still listed 3D models as not converted and
+  called `.sb` files sound banks.
+
+**Checked**
+
+| What | How | Result |
+|---|---|---|
+| loop fields of the ADX header | the 120 soundtrack streams of all five images: start < end <= samples; on `B01` the stored loop-start byte equals the one computed from the start sample | 114 looped, 6 play once, no header refused; the same table on every image |
+| `browse --kinds music` | 20 soundtrack and 9 system streams dumped from USA Disc 1: `music` alone, `audio,music`, `audio` alone | 20 WAV + `music.csv` under `music/`; with both kinds the 9 system streams under `audio/` and nothing twice; with `audio` alone all 29 under `audio/` as before |
+| a decoded stream's length | `C01.wav` through ffprobe against its header | 40.085 s both ways |
+| the bundle (macOS, Apple silicon, PyInstaller 6.21, Python 3.9) | `python build.py` into a scratch folder | `xeno-cli self-test` (every module) and `gui --self-test` pass from the bundle; `xeno-cli region` reads USA Disc 1 (46/46 addresses) |
+| nothing else broke | `cli.py self-test` with `XS3_D1`, `XS3_D2`, `XS3_JP1`, `XS3_JP2`, `XS3_PROTO` set | every module passes (34 with the motion module of the entry below) |
+
+**Not checked**
+
+* The Windows bundle. `build.py` and the workflow change have only run on
+  macOS; the first push will show whether the Windows runner agrees.
+* The `.app` was built and its two programs run from a terminal; it was not
+  opened by double-click.
+* The music WAVs were not compared with a capture of the running game.
+
+**What to re-run**
+
+* `browse --kinds music` to get the soundtrack folder. If you run `browse`
+  with every kind (the default), the 120 soundtrack streams now land in
+  `music/` and no longer in `audio/chainN/snd/adx/`.
+
+**Still behind the other kits** (and why)
+
+* **Scene scripts as programs.** Closed the same day: see the entry above.
+* **A text-coverage report** (`text-coverage --verify` in the Episode II kit).
+* **The translation editor** of the Episode I kit. Closed the same day: see
+  the entry "the translation editor" above.
 ## 2026-11-21 — characters move: `.xap` motion as glTF animations
 
 **What changed.** Episode III motion is decoded. The new `xap.py` is ported

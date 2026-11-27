@@ -1,7 +1,7 @@
 """gui.py — Local web GUI for the Xenosaga III Python Extractor.
 
 Run me directly:
-    python gui.py                 # opens your browser on a free localhost port
+    python gui.py                 # opens your browser on localhost:21389 (or a free port)
     python gui.py --no-browser    # just print the URL
     PORT=8080 python gui.py       # pin the port
     python gui.py --self-test
@@ -149,6 +149,7 @@ SECTION_OF = {
     "text-export": "Text & translation", "text-import": "Text & translation",
     "text-roundtrip": "Text & translation", "text-decode": "Text & translation",
     "sb-strings": "Text & translation", "txd-strings": "Text & translation",
+    "dialogue": "Text & translation", "sb": "Text & translation", "natives": "Text & translation",
     "nj-strings": "Text & translation", "subtitle-text": "Text & translation",
     "align-export": "Text & translation", "lang": "Text & translation",
     "evt-import": "Text & translation", "ovl-import": "Text & translation",
@@ -166,11 +167,12 @@ SECTION_OF = {
 }
 SECTION_PREFIXES: Tuple[Tuple[str, str], ...] = (
     ("font", "Fonts & scripts"), ("glyph", "Fonts & scripts"), ("statfont", "Fonts & scripts"),
-    ("text", "Text & translation"), ("lang", "Text & translation"),
+    ("text", "Text & translation"), ("lang", "Text & translation"), ("tx-", "Text & translation"),
     ("align", "Text & translation"), ("subs", "Text & translation"),
     ("evt", "Text & translation"), ("ovl", "Text & translation"),
     ("model", "Models"), ("glb", "Models"), ("blend", "Models"),
     ("image", "Browse"), ("img", "Browse"), ("tex", "Browse"), ("xtx", "Browse"),
+    ("music", "Browse"),
     ("txy", "Browse"), ("png", "Browse"),
     ("repack", "Modding"), ("chr-iso", "Modding"), ("patch", "Modding"),
     ("iso", "Disc"), ("toc", "Disc"), ("chain", "Disc"),
@@ -192,7 +194,18 @@ def section_of(name: str) -> str:
 # Friendlier text for some commands. A command without an entry here gets
 # its argparse help line, so new commands still read fine.
 COMMAND_HELP = {
-    "region": "Which build each image is (USA retail, Japanese retail or the May 2006 "
+    "tx-build": "Build patched COPIES of the discs from a translation-editor project (.json). The "
+                "editor's own Build button runs this; the card is here for scripts. Disc 1 and "
+                "Disc 2 are written together into the output folder; the originals are only read.",
+    "tx-catalog": "Every translatable string of a disc set (both discs) as one JSON file: the rows "
+                  "the translation editor shows. Harmless: reads only.",
+    "tx-selftest": "Check the translation editor against your own discs: reads everything, then "
+                   "builds test copies in the scratch folder, reads them back and deletes them. "
+                   "Takes a few minutes; needs free space only for the changed blocks on APFS.",
+    "tx-cache": "Where the translation editor keeps what it read from your discs (so the next start "
+                "is quick), how big it is, and, with --clear, delete it. Your projects are never in "
+                "it. Set XS3_TX_CACHE to keep it in another folder.",
+    "region":"Which build each image is (USA retail, Japanese retail or the May 2006 "
               "prototype), its language folder and the executable's hash. Harmless: reads only.",
     "list": "Print every entry of the disc's own index: chain, sector, size and in-game path. "
             "Chain 0 (X3.0x) is shared by both discs, chain 1 (X3.1x) is Disc 1 only, "
@@ -201,6 +214,17 @@ COMMAND_HELP = {
             "no 7-Zip needed. Give both discs to get all three chains.",
     "browse": "Convert a dump into files your computer opens: textures as PNG, audio and "
               "movies through ffmpeg, text as UTF-8. Untick the kinds you do not want.",
+    "music-list": "The soundtrack: the 120 recorded streams in <code>snd\\adx\\</code>, each with its "
+                  "sample rate, length and loop points, read from the disc. "
+                  "<code>browse</code> with the <code>music</code> kind writes them as WAV.",
+    "dialogue": "Every line the scene and battle scripts show, in the order their code plays it: one "
+                "play-script transcript per scene (branches kept, voice ids beside event lines) and "
+                "<code>dialogue.csv</code>. The developers' debug prints are left out. Reads only.",
+    "sb": "Disassemble one scene script (<code>cf\\us\\2940.sb</code>): labels, natives by name and "
+          "each string beside the instruction that pushes it. Reads only.",
+    "natives": "Every function the scripts call into the engine, with call counts and the argument "
+               "types seen; with an output folder, one listing per script. Tick <code>table</code> "
+               "to list the natives the disc's executable registers instead.",
     "model": "One model straight from the disc to a <code>.glb</code> Blender opens.",
     "models": "Every model at once, as <code>.glb</code> files (see docs/BLENDER.md).",
     "text-export": "Write the dialogue, menu and subtitle banks to an editable UTF-8 tree.",
@@ -867,6 +891,7 @@ INDEX_HTML = r"""<!doctype html>
     <div class="tagline">Also sprach Zarathustra · disc unpacker</div>
   </div>
   <div class="actions">
+    <button id="btn-editor" title="Browse every string of the game by type or by speaker, translate into any language, build patched copies of both discs">Translation editor</button>
     <button class="ghost" id="btn-refresh">Refresh status</button>
   </div>
 </header>
@@ -1210,6 +1235,7 @@ async function loadStatus() {
   if (first) first.classList.add('open');
 })();
 document.getElementById('btn-refresh').addEventListener('click', loadStatus);
+document.getElementById('btn-editor').addEventListener('click', () => window.open('/editor', '_blank'));
 </script>
 </body>
 </html>
@@ -1262,7 +1288,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = url.path
         if not self._local_host():
             return self._send_json(403, {"error": "this server answers only to localhost / 127.0.0.1"})
+        if path == "/editor" or path.startswith("/tx/"):
+            import txserver  # translation editor: /editor page + /tx/* reads (loopback Host checked there too)
+            if txserver.handle_get(self, path, url.query):
+                return
         if path in ("/", "/index.html"):
+            if os.environ.get("XS3_EDITOR_ONLY") == "1":     # the stand-alone editor has no extractor cards
+                self.send_response(302)
+                self.send_header("Location", "/editor")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             return self._send(200, page(), "text/html; charset=utf-8")
         if path == "/detect":
             return self._send_json(200, detect())
@@ -1291,7 +1327,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self._local_host() or not self._local_origin():
             return self._send_json(403, {"error": "cross-origin request refused"})
         length = int(self.headers.get("Content-Length", "0") or 0)
-        body = self.rfile.read(length).decode("utf-8", errors="replace") if length else ""
+        raw = self.rfile.read(length) if length else b""
+        if url.path == "/editor" or url.path.startswith("/tx/"):
+            import txserver  # translation editor: JSON bodies, token-checked there (X-TX-Token)
+            if length > txserver.MAX_BODY:
+                return self._send_json(413, {"error": "request too large"})
+            if txserver.handle_post(self, url.path, raw, self.headers.get("Content-Type", "")):
+                return
+        body = raw.decode("utf-8", errors="replace")
         form = parse_qs(body, keep_blank_values=True)
         for prefix, handler in (("/preview/", self._preview), ("/run/", self._run)):
             if url.path.startswith(prefix):
@@ -1510,6 +1553,27 @@ def self_test() -> int:
     html = page()
     check("__XS3_CSS__" not in html and ".card-head" in html and "/schema" in html
           and ".section" in html, "page assembled")
+    # the translation editor: served by this same server (txserver), opened first under its own name
+    import txserver
+    check("btn-editor" in html and section_of("tx-build") == "Text & translation"
+          and {"tx-build", "tx-catalog"} <= names, "translation editor: header button, tx-build / tx-catalog cards")
+    check(editor_mode("Xenosaga-III-Translation-Editor.exe") and not editor_mode("gui.exe")
+          and not editor_mode("gui.py"), "the second executable name opens the editor first")
+    ed = txserver.page_html()
+    check(txserver.TOKEN in ed and "__TX_" not in ed and "/tx/catalog" in ed, "editor page assembled, token injected")
+    was = os.environ.get("XS3_EDITOR_ONLY")
+    os.environ["XS3_EDITOR_ONLY"] = "1"
+    try:
+        solo = txserver.page_html()
+        check(editor_only() and "Extractor cards" not in solo and "Extractor cards" in ed,
+              "the stand-alone editor package hides the way back to extractor cards")
+    finally:
+        if was is None:
+            os.environ.pop("XS3_EDITOR_ONLY", None)
+        else:
+            os.environ["XS3_EDITOR_ONLY"] = was
+    if FROZEN:
+        print(f"  (bundle: {'stand-alone Translation Editor' if editor_only() else 'Extractor'})")
     print("self-test", "passed" if ok else "FAILED")
     return 0 if ok else 1
 
@@ -1518,13 +1582,47 @@ def self_test() -> int:
 # Entry point
 # ---------------------------------------------------------------------------
 
+HOME_PORT = 21389       # after SLUS-21389 (Disc 1)
+
+
 def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind((HOST, 0))
-        return s.getsockname()[1]
+    """The kit's usual port when it is free, else any free one. The same port
+    on every launch matters: the browser keeps what the pages remember (the
+    translation editor's discs, project and switches) per address, port
+    included, so a new port each time would look like a first start."""
+    for want in (HOME_PORT, 0):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                if os.name != "nt":      # as the server binds (allow_reuse_address): a restart within the
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)   # old socket's TIME_WAIT keeps its port
+                s.bind((HOST, want))     # (not on Windows, where SO_REUSEADDR would share a port in use)
+                return s.getsockname()[1]
+        except OSError:
+            continue
+    return 0
 
 
-def serve(port: Optional[int] = None, open_browser: bool = True) -> int:
+def editor_mode(argv0: Optional[str] = None) -> bool:
+    """True when this program was started under its translation-editor name
+    (the release's second executable, the translate.* launchers' --editor)."""
+    name = Path(argv0 if argv0 is not None else (sys.executable if FROZEN else sys.argv[0])).stem.lower()
+    return "translation-editor" in name or "translation editor" in name
+
+
+def editor_only() -> bool:
+    """True for the stand-alone Translation Editor package: started under the
+    editor's name with no extractor GUI beside it (packaging/translation-editor.spec).
+    Then ``/`` is the editor too and the page has no way back to extractor cards.
+    ``XS3_EDITOR_ONLY=1`` forces it (tests, a source checkout used as the editor only)."""
+    if os.environ.get("XS3_EDITOR_ONLY") == "1":
+        return True
+    if not FROZEN or not editor_mode():
+        return False
+    sibling = "gui.exe" if os.name == "nt" else "gui"
+    return not (Path(sys.executable).resolve().parent / sibling).exists()
+
+
+def serve(port: Optional[int] = None, open_browser: bool = True, start: str = "/") -> int:
     if not CLI_TARGET.exists():
         if FROZEN:
             _fatal("CLI binary missing", f"Expected {CLI_TARGET.name} next to the GUI.\n\n"
@@ -1536,6 +1634,9 @@ def serve(port: Optional[int] = None, open_browser: bool = True) -> int:
         schema()
     except Exception as exc:
         _fatal("Could not read the CLI's commands", f"{type(exc).__name__}: {exc}")
+    if editor_only():
+        os.environ["XS3_EDITOR_ONLY"] = "1"      # txserver reads it: the page hides the extractor link
+        start = "/editor"
     port = int(port or os.environ.get("PORT") or _free_port())
     url = f"http://localhost:{port}/"
     try:
@@ -1550,8 +1651,11 @@ def serve(port: Optional[int] = None, open_browser: bool = True) -> int:
         print(f"[gui] warning: cli.py could not import {', '.join(errs)}; "
               "install the requirements: python -m pip install -r requirements.txt")
     print("[gui] Press Ctrl+C to stop.", flush=True)
+    if start and start != "/":
+        print(f"[gui] Translation editor: {url.rstrip('/')}{start}")
     if open_browser:
-        threading.Thread(target=lambda: webbrowser.open(url), daemon=True).start()
+        first = url.rstrip("/") + start if start and start != "/" else url
+        threading.Thread(target=lambda: webbrowser.open(first), daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -1564,22 +1668,26 @@ def serve(port: Optional[int] = None, open_browser: bool = True) -> int:
 def add_commands(subparsers) -> None:
     """Register ``gui`` (start this web GUI). Hidden from the GUI's own cards."""
     p = subparsers.add_parser("gui", help="start the local web GUI (127.0.0.1 only)")
-    p.add_argument("--port", type=int, help="port to listen on (default: a free one)")
+    p.add_argument("--port", type=int, help="port to listen on (default: 21389 when free, else a free one)")
     p.add_argument("--no-browser", action="store_true", help="print the URL instead of opening a browser")
-    p.set_defaults(func=lambda a: serve(a.port, not a.no_browser))
+    p.add_argument("--editor", action="store_true", help="open the translation editor page first")
+    p.set_defaults(func=lambda a: serve(a.port, not a.no_browser, "/editor" if a.editor else "/"))
 
 
 def main(argv=None) -> int:
     import argparse
     ap = argparse.ArgumentParser(description="Xenosaga III extractor: local web GUI (127.0.0.1 only). "
                                  "PORT=N in the environment also pins the port.")
-    ap.add_argument("--port", type=int, help="port to listen on (default: $PORT or a free one)")
+    ap.add_argument("--port", type=int, help="port to listen on (default: $PORT, else 21389 when free, else a free one)")
     ap.add_argument("--no-browser", action="store_true", help="print the URL instead of opening a browser")
     ap.add_argument("--self-test", action="store_true", help="run the GUI self-test and exit")
+    ap.add_argument("--editor", action="store_true", help="open the translation editor page first "
+                    "(also when the program is started as Xenosaga-III-Translation-Editor)")
     a = ap.parse_args(sys.argv[1:] if argv is None else argv)   # --help / unknown flags exit here
     if a.self_test:
         return self_test()
-    return serve(a.port, open_browser=not a.no_browser)
+    return serve(a.port, open_browser=not a.no_browser,
+                 start="/editor" if (a.editor or editor_mode()) else "/")
 
 
 XS3_CSS = r"""

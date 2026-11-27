@@ -128,9 +128,20 @@ Re-patching an output works on the same rules. An entry already moved past
 its chain's end may grow in place only up to the next object on the image,
 whatever chain or ISO9660 file owns it (`Disc.allocation`).
 
-Only the ISO9660 side of these ISO9660 + UDF bridge images is kept
-consistent: after a grow the UDF anchor and partition still describe the old
-size, and a rewritten ISO9660 file's UDF record keeps the old extent.
+Both halves of these ISO9660 + UDF bridge images are kept consistent. The
+game reads ISO9660 only, but tools that mount or burn a disc may go through
+UDF. After the writes, `Disc.sync_udf` (`udf.py`) puts the UDF end anchor in
+the last sector (a grown image is **one sector longer** for it; the old anchor
+is left mid-image, unused), resizes the UDF partition and the integrity table
+to match, and rewrites the UDF file entry of every moved or resized ISO9660
+file. Every changed descriptor gets a new tag checksum and CRC. The
+descriptor handling is ported from Anzinono's
+[xenosaga3-translation-kit](https://github.com/Anzinono/xenosaga3-translation-kit)
+(MIT). Checked: all four known images (USA Disc 1/2, Japan Disc 1, the
+prototype) pass `udf.check` untouched; a USA pair with `OV01.OVL` grown to
+326,120 bytes and `menutext.txd` grown passes it too, and pycdlib's
+independent UDF reader returns the same 22 files with the same bytes as
+ISO9660.
 
 **Verification** re-opens every output: no two files overlap on the image
 that did not already overlap in the source (every sized entry of every chain

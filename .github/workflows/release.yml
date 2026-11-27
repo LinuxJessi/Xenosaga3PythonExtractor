@@ -47,14 +47,16 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pyinstaller
 
-      - name: Render version-info resources
-        run: python packaging/render_version_info.py
-
-      - name: Generate placeholder icon (skipped if packaging/icon.ico is committed)
-        run: python packaging/build_icon.py
-
-      - name: Build with PyInstaller
-        run: pyinstaller --noconfirm --clean packaging/xenosaga-extractor.spec
+      # build.py renders the version resources, makes the placeholder icon
+      # (skipped if packaging/icon.ico is committed), runs PyInstaller on
+      # packaging/xenosaga-extractor.spec and then runs the finished bundle's
+      # own self-tests (xeno-cli self-test, gui --self-test): a bundle that is
+      # missing a module fails the job here. Before 2026-11-21 the bundle was
+      # built but never run, and a xeno-cli without gui.py refused every command.
+      # --all: the extractor kit AND the Translation Editor on its own
+      # (packaging/translation-editor.spec), each with its bundle self-tests.
+      - name: Build with PyInstaller and run the bundles' self-tests
+        run: python build.py --clean --all
 
       # ---- bundle external tools ----------------------------------------
       # We resolve the *latest* upstream release at build time rather than
@@ -155,12 +157,18 @@ jobs:
           $zip = "${{ env.RELEASE_NAME }}-${{ steps.ver.outputs.version }}-win64.zip"
           Compress-Archive -Path "dist/${{ env.RELEASE_NAME }}/*" -DestinationPath $zip
           "ZIP_PATH=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # the Translation Editor's own download: no extractor, no ffmpeg/7-Zip
+          $ezip = "Xenosaga3-Translation-Editor-${{ steps.ver.outputs.version }}-win64.zip"
+          Compress-Archive -Path "dist/Xenosaga3-Translation-Editor/*" -DestinationPath $ezip
+          "EDITOR_ZIP_PATH=$ezip" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload build artefact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.RELEASE_NAME }}-win64
-          path: ${{ env.ZIP_PATH }}
+          path: |
+            ${{ env.ZIP_PATH }}
+            ${{ env.EDITOR_ZIP_PATH }}
           if-no-files-found: error
 
       - name: Attach to GitHub Release (tag pushes only)
@@ -168,7 +176,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          files: ${{ env.ZIP_PATH }}
+          files: |
+            ${{ env.ZIP_PATH }}
+            ${{ env.EDITOR_ZIP_PATH }}
           generate_release_notes: true
           body: |
             ## Windows pre-built release
@@ -176,6 +186,14 @@ jobs:
             Download `${{ env.RELEASE_NAME }}-${{ steps.ver.outputs.version }}-win64.zip`,
             unzip anywhere, double-click **gui.exe**. No Python, ffmpeg, or
             7-Zip install required — everything's in the zip.
+            **Xenosaga-III-Translation-Editor.exe** opens the same window
+            directly on the translation editor.
+
+            **Only want to translate?** Download
+            `Xenosaga3-Translation-Editor-${{ steps.ver.outputs.version }}-win64.zip`
+            instead: the translation editor on its own. Unzip, double-click
+            **Xenosaga-III-Translation-Editor.exe**, and the editor opens in your
+            browser. It needs nothing else installed.
 
             ### Windows SmartScreen will warn you the first time
 
